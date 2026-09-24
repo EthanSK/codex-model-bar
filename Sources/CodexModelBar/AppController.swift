@@ -15,6 +15,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let catalog = ModelCatalogService()
     private let watcher = CurrentModelWatcher()
     private let switcher = ModelSwitcher()
+    private let reasoningSwitcher = ReasoningSwitcher()
 
     /// Every model Codex offers (before the user's show/hide choices).
     private var allModels: [CodexModel] = []
@@ -24,6 +25,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
+        barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
         barView.onStatusClick = { [weak self] in self?.statusClicked() }
         barView.onSizeChange = { [weak self] in
             guard let self else { return }
@@ -40,7 +42,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.refreshModels()
         }
 
-        watcher.onChange = { [weak self] modelID in self?.barView.setCurrentModel(id: modelID) }
+        watcher.onChange = { [weak self] selection in self?.barView.setCurrentSelection(selection) }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start()
 
@@ -102,12 +104,37 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func applyModels(_ models: [CodexModel]) {
         allModels = models.filter { !$0.hidden }
         let hidden = Preferences.hiddenModelIDs
+        barView.setCatalogModels(allModels)
         barView.setModels(allModels.filter { !hidden.contains($0.id) })
         watcher.update(pid: tracker.snapshot.codexIsFrontmost ? tracker.snapshot.codexPID : nil, models: allModels)
         layout(for: tracker.snapshot)
     }
 
     // MARK: - Switching
+
+    private func changeEffort(to effort: String) {
+        guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
+        guard let codex = tracker.codexApp,
+              let modelID = barView.currentModelIdentifier,
+              let model = allModels.first(where: { $0.id == modelID }) else { return }
+        barView.setBusyReasoning(true)
+        barView.showStatus(nil)
+        reasoningSwitcher.setEffort(effort, model: model, allModels: allModels, codex: codex) { [weak self] result in
+            guard let self else { return }
+            self.barView.setBusyReasoning(false)
+            switch result {
+            case .changed:
+                self.watcher.refreshSoon()
+            case .cancelledForTyping:
+                self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
+                self.watcher.refreshSoon()
+            case .failed(let reason):
+                Log.info("reasoning change to \(effort) failed: \(reason)")
+                self.barView.showStatus(reason, color: .systemOrange)
+                self.watcher.refreshSoon()
+            }
+        }
+    }
 
     private func switchTo(_ model: CodexModel) {
         guard AX.isTrusted else {

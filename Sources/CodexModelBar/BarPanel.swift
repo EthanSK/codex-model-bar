@@ -41,6 +41,8 @@ final class BarView: NSVisualEffectView {
 
     /// Called when a model button is clicked.
     var onSelect: ((CodexModel) -> Void)?
+    /// Called when a reasoning tick is chosen.
+    var onSelectEffort: ((String) -> Void)?
     /// Called when the status text is clicked (used for "Allow Accessibility access").
     var onStatusClick: (() -> Void)?
     /// Repositions the panel when a status message changes its required width.
@@ -49,12 +51,21 @@ final class BarView: NSVisualEffectView {
     var menuProvider: (() -> NSMenu)?
 
     private let stack = NSStackView()
+    private let contentStack = NSStackView()
+    private let reasoningLabel = NSTextField(labelWithString: "Reasoning —")
+    private let reasoningSlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let separator = NSBox()
     private let statusButton = NSButton(title: "", target: nil, action: nil)
     private var buttons: [String: ModelButton] = [:]
     private var models: [CodexModel] = []
+    private var catalogModels: [CodexModel] = []
     private var currentModelID: String?
+    private var currentEffort: String?
+    private var busyReasoning = false
     private var busyModelID: String?
     private var statusHideWork: DispatchWorkItem?
+
+    var currentModelIdentifier: String? { currentModelID }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -65,11 +76,38 @@ final class BarView: NSVisualEffectView {
         layer?.cornerRadius = 9
         layer?.masksToBounds = true
 
+        contentStack.orientation = .horizontal
+        contentStack.spacing = 8
+        contentStack.alignment = .centerY
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentStack)
+
         stack.orientation = .horizontal
         stack.spacing = 4
         stack.alignment = .centerY
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        contentStack.addArrangedSubview(stack)
+
+        separator.boxType = .separator
+        NSLayoutConstraint.activate([separator.widthAnchor.constraint(equalToConstant: 1),
+                                     separator.heightAnchor.constraint(equalToConstant: 17)])
+        contentStack.addArrangedSubview(separator)
+
+        reasoningLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        reasoningLabel.textColor = .secondaryLabelColor
+        reasoningLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        contentStack.addArrangedSubview(reasoningLabel)
+
+        reasoningSlider.numberOfTickMarks = 2
+        reasoningSlider.allowsTickMarkValuesOnly = true
+        reasoningSlider.tickMarkPosition = .below
+        reasoningSlider.isContinuous = false
+        reasoningSlider.target = self
+        reasoningSlider.action = #selector(effortClicked(_:))
+        reasoningSlider.toolTip = "Choose reasoning effort"
+        reasoningSlider.setAccessibilityLabel("Reasoning effort")
+        reasoningSlider.widthAnchor.constraint(equalToConstant: 122).isActive = true
+        contentStack.addArrangedSubview(reasoningSlider)
+        refreshReasoningControl()
 
         statusButton.isBordered = false
         statusButton.font = .systemFont(ofSize: 11, weight: .medium)
@@ -83,10 +121,10 @@ final class BarView: NSVisualEffectView {
         NSLayoutConstraint.activate([
             // Buttons centred in the strip; they may shrink (truncating titles) but never
             // overlap the status text on the right.
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor).withPriority(.defaultLow),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: statusButton.leadingAnchor, constant: -8),
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            contentStack.centerXAnchor.constraint(equalTo: centerXAnchor).withPriority(.defaultLow),
+            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: statusButton.leadingAnchor, constant: -8),
             statusButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             statusButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
         ])
@@ -106,10 +144,15 @@ final class BarView: NSVisualEffectView {
 
     /// Natural width of the visible buttons, with room for a temporary status.
     var preferredWidth: CGFloat {
-        stack.fittingSize.width + 24 + (statusButton.isHidden ? 0 : statusButton.fittingSize.width + 12)
+        contentStack.fittingSize.width + 24 + (statusButton.isHidden ? 0 : statusButton.fittingSize.width + 12)
     }
 
     // MARK: - Content
+
+    func setCatalogModels(_ models: [CodexModel]) {
+        catalogModels = models
+        refreshReasoningControl()
+    }
 
     func setModels(_ newModels: [CodexModel]) {
         guard newModels != models else { return }
@@ -124,26 +167,55 @@ final class BarView: NSVisualEffectView {
             buttons[model.id] = button
         }
         refreshButtonStates()
+        refreshReasoningControl()
     }
 
     /// Highlights the model Codex reports for the open chat (nil = unknown).
     func setCurrentModel(id: String?) {
-        guard id != currentModelID else { return }
-        currentModelID = id
+        setCurrentSelection(CurrentSelection(modelID: id, effort: nil))
+    }
+
+    func setCurrentSelection(_ selection: CurrentSelection) {
+        guard selection.modelID != currentModelID || selection.effort != currentEffort else { return }
+        currentModelID = selection.modelID
+        currentEffort = selection.effort
         refreshButtonStates()
+        refreshReasoningControl()
     }
 
     /// Marks a switch in progress (dims the other buttons).
     func setBusyModel(id: String?) {
         busyModelID = id
         refreshButtonStates()
+        refreshReasoningControl()
+    }
+
+    func setBusyReasoning(_ busy: Bool) {
+        busyReasoning = busy
+        refreshButtonStates()
+        refreshReasoningControl()
     }
 
     private func refreshButtonStates() {
         for (id, button) in buttons {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
-            button.isEnabled = busyModelID == nil
+            button.isEnabled = busyModelID == nil && !busyReasoning
         }
+    }
+
+    private func refreshReasoningControl() {
+        let model = catalogModels.first { $0.id == currentModelID }
+        let efforts = model?.supportedEfforts ?? []
+        let index = currentEffort.flatMap { efforts.firstIndex(of: $0) }
+        reasoningSlider.numberOfTickMarks = max(efforts.count, 2)
+        reasoningSlider.minValue = 0
+        reasoningSlider.maxValue = Double(max(efforts.count - 1, 1))
+        reasoningSlider.doubleValue = Double(index ?? 0)
+        reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning
+        let value = currentEffort.map(CurrentModelMatcher.label(forEffort:)) ?? "—"
+        reasoningLabel.stringValue = "Reasoning \(value)"
+        reasoningSlider.setAccessibilityValue(value)
+        onSizeChange?()
     }
 
     /// Shows a short message on the right. `sticky` messages stay until replaced;
@@ -173,6 +245,14 @@ final class BarView: NSVisualEffectView {
 
     @objc private func modelClicked(_ sender: ModelButton) {
         onSelect?(sender.model)
+    }
+
+    @objc private func effortClicked(_ sender: NSSlider) {
+        guard let model = catalogModels.first(where: { $0.id == currentModelID }) else { return }
+        let index = sender.integerValue
+        guard model.supportedEfforts.indices.contains(index),
+              model.supportedEfforts[index] != currentEffort else { return }
+        onSelectEffort?(model.supportedEfforts[index])
     }
 
     @objc private func statusClicked() {

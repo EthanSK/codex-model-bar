@@ -13,3 +13,9 @@ Escape closes an open menu but leaves typed search text in the composer. The bar
 Codex can show more than one composer. A model-button title alone cannot identify the task receiving keyboard input. The bar prefers the composer whose message box has keyboard focus and rechecks that focus as Codex moves between tasks. The current-model highlight follows that composer.
 
 A newly opened extra Codex window was not a reliable live-test target in the observed desktop build: its web Accessibility tree could remain incomplete, and a task deep link opened the primary window. Live tests should identify the exact open task and verify the resulting model while preserving any in-progress draft.
+
+## Reasoning effort
+
+Codex desktop 26.917 exposes each model's `supportedReasoningEfforts` and `defaultReasoningEffort` through `model/list`; its on-disk cache uses `supported_reasoning_levels` and `default_reasoning_level`. The composer's model button title includes the current effort (for example, `Opus 5.5 Extra High`). Match the model name first, then parse the remaining effort label; a missing label is unknown, not proof of the model's default.
+
+The installed Codex renderer has `composer.increaseReasoningEffort` and `composer.decreaseReasoningEffort` commands. User-assigned keys live in `~/.codex/keybindings.json`; do not assume a particular shortcut is available. The bar reads compatible bindings, sends them only to Codex's process, and checks the model button after each step. A model can expose different levels than another model, so the slider's tick count follows the current model's catalogue entry.

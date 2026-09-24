@@ -62,6 +62,14 @@ h1 { max-width: 650px; font-size: clamp(54px, 5.4vw, 86px); font-weight: 650; li
 .model-choice { padding: 7px 10px; border: 0; border-radius: 6px; color: #41506b; background: transparent; font-size: 11px; font-weight: 690; white-space: nowrap; cursor: pointer; }
 .model-choice:hover { background: #aebfdf99; }.model-choice.is-current { background: var(--blue); color: #fff; }
 .model-choice:focus-visible { outline-offset: 1px; }
+.preview-divider { width: 1px; height: 21px; margin: 0 5px; background: #8694ac77; flex: none; }
+.reasoning-preview { display: flex; align-items: center; gap: 7px; color: #41506b; font-size: 10px; font-weight: 650; white-space: nowrap; }
+.reasoning-preview > span { min-width: 105px; }
+.reasoning-preview .preview-slider-track { display: grid; min-width: 92px; }
+.reasoning-preview input { width: 92px; height: 14px; margin: 0 3px 0 0; accent-color: var(--blue); cursor: pointer; }
+.preview-ticks { display: flex; justify-content: space-between; padding: 0 6px; }
+.preview-ticks i { width: 1px; height: 4px; background: #7485a5; }
+.reasoning-preview output { color: #2e5ebf; }
 .preview-note { display: flex; justify-content: center; align-items: center; gap: 7px; margin: 20px 0 0; color: #6d7b8c; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .note-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
 .feature-section { display: grid; grid-template-columns: .85fr 1.15fr; gap: 60px; padding-block: 65px 110px; border-top: 1px solid var(--line); }
@@ -104,7 +112,7 @@ code { font-size: .9em; }
   .site-header nav { gap: 12px; }.site-header nav a:not(.source-link) { display: none; }.source-link { padding: 9px 10px; }
   .hero { padding-block: 60px 68px; gap: 25px; }.hero h1 { font-size: clamp(47px, 13vw, 69px); }.intro { font-size: 16px; }
   .stage { padding-top: 18px; }.app-window { height: 310px; }.fake-sidebar { width: 21%; padding-inline: 10px; }.fake-task { padding-top: 53px; }.fake-composer { min-height: 70px; }
-  .preview-bar { gap: 0; padding-inline: 2px; }.model-choice { padding: 7px 6px; font-size: 9px; }.preview-note { text-align: center; }
+  .preview-bar { justify-content: flex-start; gap: 0; width: 100%; overflow-x: auto; padding-inline: 4px; }.model-choice { padding: 7px 6px; font-size: 9px; }.preview-note { text-align: center; }
   .feature-section { padding-block: 54px 70px; }.setup-section { padding-block: 65px; }.setup-grid { grid-template-columns: 1fr; }.bridge-section { grid-template-columns: 1fr; gap: 20px; padding-block: 70px; }
   .footer-grid { grid-template-columns: 1fr; gap: 2px; }
 }

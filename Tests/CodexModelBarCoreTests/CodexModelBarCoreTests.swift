@@ -28,6 +28,19 @@ final class CurrentModelMatcherTests: XCTestCase {
         XCTAssertEqual(id("Fable 5.1"), "claude-fable-5-1")         // title with no effort suffix
     }
 
+    func testComposerReasoningTitles() {
+        func effort(_ title: String) -> String? {
+            CurrentModelMatcher.selection(forButtonTitle: title, among: catalogue).effort
+        }
+        XCTAssertEqual(effort("Opus 5.5 Extra High"), "xhigh")
+        XCTAssertEqual(effort("GPT-6 Sol Medium"), "medium")
+        XCTAssertEqual(effort("GPT-6 Astra Ultra"), "ultra")
+        XCTAssertEqual(effort("GPT-6 Sol Max"), "max")
+        XCTAssertNil(effort("Fable 5.1"))
+        XCTAssertNil(effort("Some other button"))
+        XCTAssertEqual(CurrentModelMatcher.label(forEffort: "xhigh"), "Extra High")
+    }
+
     func testMenuItemTitles() {
         // Recent items carry a 1…3 index; search hits carry the model description.
         XCTAssertEqual(id("1 Opus 5.5 Extra High Standard"), "claude-opus-5-5")
@@ -84,6 +97,29 @@ final class CodexModelParsingTests: XCTestCase {
         XCTAssertEqual(models.map(\.id), ["gpt-5.5", "gpt-reserve"])
         XCTAssertEqual(models.map(\.hidden), [false, true])
         XCTAssertTrue(CodexModelParsing.parseModelsCache(Data("nope".utf8)).isEmpty)
+    }
+
+    func testReasoningLevelsAndOlderCachedModels() throws {
+        let result: [String: Any] = ["data": [[
+            "model": "gpt-6-sol", "displayName": "GPT-6-Sol",
+            "supportedReasoningEfforts": [["reasoningEffort": "low"], ["reasoningEffort": "medium"],
+                                           ["reasoningEffort": "high"]],
+            "defaultReasoningEffort": "medium",
+        ]]]
+        let model = try XCTUnwrap(CodexModelParsing.parseModelListResult(result).models.first)
+        XCTAssertEqual(model.supportedEfforts, ["low", "medium", "high"])
+        XCTAssertEqual(model.defaultEffort, "medium")
+
+        let cache = Data("""
+            {"models":[{"slug":"claude-opus-5-5","display_name":"Opus 5.5",
+            "supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],
+            "default_reasoning_level":"high"}]}
+            """.utf8)
+        XCTAssertEqual(CodexModelParsing.parseModelsCache(cache).first?.supportedEfforts, ["low", "high"])
+        let old = Data("""
+            [{"id":"gpt-6-sol","displayName":"GPT-6-Sol","description":"","hidden":false}]
+            """.utf8)
+        XCTAssertEqual(try JSONDecoder().decode([CodexModel].self, from: old).first?.supportedEfforts, [])
     }
 }
 

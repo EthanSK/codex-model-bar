@@ -19,12 +19,33 @@ public struct CodexModel: Codable, Equatable, Hashable, Sendable {
     /// Hidden models exist in the catalogue but Codex keeps them out of its picker,
     /// so the bar never offers them either.
     public var hidden: Bool
+    /// Effort levels the picker exposes, in increasing order.
+    public var supportedEfforts: [String]
+    public var defaultEffort: String?
 
-    public init(id: String, displayName: String, description: String = "", hidden: Bool = false) {
+    public init(id: String, displayName: String, description: String = "", hidden: Bool = false,
+                supportedEfforts: [String] = [], defaultEffort: String? = nil) {
         self.id = id
         self.displayName = displayName
         self.description = description
         self.hidden = hidden
+        self.supportedEfforts = supportedEfforts
+        self.defaultEffort = defaultEffort
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, displayName, description, hidden, supportedEfforts, defaultEffort
+    }
+
+    /// Lists cached by older releases did not contain effort data.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        displayName = try values.decode(String.self, forKey: .displayName)
+        description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
+        hidden = try values.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+        supportedEfforts = try values.decodeIfPresent([String].self, forKey: .supportedEfforts) ?? []
+        defaultEffort = try values.decodeIfPresent(String.self, forKey: .defaultEffort)
     }
 }
 
@@ -48,7 +69,10 @@ public enum CodexModelParsing {
                 id: slug,
                 displayName: name,
                 description: row["description"] as? String ?? "",
-                hidden: row["hidden"] as? Bool ?? false
+                hidden: row["hidden"] as? Bool ?? false,
+                supportedEfforts: (row["supportedReasoningEfforts"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["reasoningEffort"] as? String },
+                defaultEffort: row["defaultReasoningEffort"] as? String
             )
         }
         let cursor = result["nextCursor"] as? String
@@ -73,7 +97,10 @@ public enum CodexModelParsing {
                 id: slug,
                 displayName: row["display_name"] as? String ?? slug,
                 description: row["description"] as? String ?? "",
-                hidden: visibility != "list"
+                hidden: visibility != "list",
+                supportedEfforts: (row["supported_reasoning_levels"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["effort"] as? String },
+                defaultEffort: row["default_reasoning_level"] as? String
             )
         }
     }

@@ -1,5 +1,15 @@
 import Foundation
 
+public struct CurrentSelection: Equatable, Sendable {
+    public let modelID: String?
+    public let effort: String?
+
+    public init(modelID: String?, effort: String?) {
+        self.modelID = modelID
+        self.effort = effort
+    }
+}
+
 /// Works out which model a piece of Codex UI refers to from its accessibility title.
 ///
 /// Titles seen on Codex desktop 26.917 (AX titles of web buttons):
@@ -15,6 +25,33 @@ import Foundation
 ///     description), so we require a word boundary after the name and pick the
 ///     **longest** matching name (so `GPT-6` can never shadow `GPT-6-Sol`).
 public enum CurrentModelMatcher {
+    private static let effortLabels: [(slug: String, label: String)] = [
+        ("xhigh", "extra high"), ("ultra", "ultra"), ("medium", "medium"),
+        ("high", "high"), ("low", "low"), ("max", "max"),
+    ]
+
+    public static func selection(forButtonTitle title: String, among models: [CodexModel]) -> CurrentSelection {
+        guard let model = model(forTitle: title, among: models) else {
+            return CurrentSelection(modelID: nil, effort: nil)
+        }
+        let normalized = normalize(title)
+        let name = normalize(model.displayName)
+        let suffix = normalized.dropFirst(name.count).trimmingCharacters(in: .whitespaces)
+        let effort = effortLabels.first { suffix == $0.label }.map(\.slug)
+        return CurrentSelection(modelID: model.id, effort: effort)
+    }
+
+    public static func label(forEffort effort: String) -> String {
+        switch effort {
+        case "xhigh": return "Extra High"
+        case "ultra": return "Ultra"
+        case "max": return "Max"
+        case "high": return "High"
+        case "medium": return "Medium"
+        case "low": return "Low"
+        default: return effort.capitalized
+        }
+    }
     /// Lowercases, turns `-`/`_` into spaces and collapses whitespace.
     public static func normalize(_ text: String) -> String {
         let mapped = text.lowercased().map { ch -> Character in

@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#e9eff5">
-  <meta name="description" content="A thin macOS model bar that follows your Codex window and switches the open task in one click.">
+  <meta name="description" content="A thin macOS bar for switching the open Codex task's model and reasoning level.">
   <meta property="og:title" content="Codex Model Bar">
-  <meta property="og:description" content="Models, one click below Codex.">
+  <meta property="og:description" content="Models and reasoning, right below Codex.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://ethansk.github.io/codex-model-bar/">
   <meta property="og:image" content="https://ethansk.github.io/codex-model-bar/assets/app-icon.png">
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="styles.css?v=1">
-  <script src="script.js?v=1" defer></script>
-  <title>Codex Model Bar — models, one click below Codex</title>
+  <link rel="stylesheet" href="styles.css?v=2">
+  <script src="script.js?v=2" defer></script>
+  <title>Codex Model Bar — models and reasoning below Codex</title>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -33,8 +33,8 @@
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
         <p class="eyebrow">macOS companion app · open source</p>
-        <h1 id="hero-title">Models, one click below Codex.</h1>
-        <p class="intro">A thin strip follows your Codex window. Pick the model for the open task without losing your place or your draft.</p>
+        <h1 id="hero-title">Models and reasoning, right below Codex.</h1>
+        <p class="intro">A thin strip follows your Codex window. Pick the model and reasoning level for the open task without losing your place or your draft.</p>
         <div class="hero-actions">
           <a class="primary-action" href="#install">Build the app <span aria-hidden="true">↗</span></a>
           <a class="secondary-action" href="https://github.com/EthanSK/codex-model-bar">Source on GitHub</a>
@@ -51,8 +51,10 @@
           <button type="button" class="model-choice" data-model="Fable 5.1" aria-pressed="false">Fable 5.1</button>
           <button type="button" class="model-choice" data-model="GPT-6 Sol" aria-pressed="false">GPT-6 Sol</button>
           <button type="button" class="model-choice" data-model="GPT-6 Astra" aria-pressed="false">GPT-6 Astra</button>
+          <span class="preview-divider" aria-hidden="true"></span>
+          <label class="reasoning-preview" for="reasoning-preview-slider"><span>Reasoning <output id="reasoning-preview-value">Extra High</output></span><span class="preview-slider-track"><input id="reasoning-preview-slider" type="range" min="0" max="4" step="1" value="3" aria-label="Reasoning effort preview"><span class="preview-ticks" id="reasoning-preview-ticks" aria-hidden="true"></span></span></label>
         </div>
-        <p class="preview-note"><span class="note-dot" aria-hidden="true"></span> Preview only · <span id="preview-status" aria-live="polite">Opus 5.5 selected in preview</span></p>
+        <p class="preview-note"><span class="note-dot" aria-hidden="true"></span> Preview only · <span id="preview-status" aria-live="polite">Opus 5.5 · Extra High</span></p>
       </div>
     </section>
 
@@ -60,14 +62,14 @@
       <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="how-title">A shortcut that stays in sight.</h2></div>
       <div class="feature-list">
         <div class="feature"><span class="feature-mark">01</span><div><h3>Follows the window</h3><p>The 30-point bar sits under Codex when there is room, moves above it when needed, and hides when Codex is in the background.</p></div></div>
-        <div class="feature"><span class="feature-mark">02</span><div><h3>Fits your models</h3><p>The strip is only as wide as its visible buttons. Right-click it to hide models you do not use, refresh the list, or change Open at login.</p></div></div>
-        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's menu</h3><p>A click opens Codex's own <code>/model</code> menu, chooses the matching result, and checks that the open task changed model. It pauses while you type.</p></div></div>
+        <div class="feature"><span class="feature-mark">02</span><div><h3>Fits your choices</h3><p>The strip fits its visible model buttons and a ticked reasoning slider. Right-click it to hide models you do not use, refresh the list, or change Open at login.</p></div></div>
+        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's controls</h3><p>Model buttons use Codex's <code>/model</code> menu. The reasoning slider uses your configured Codex shortcuts and checks each change. Both pause while you type.</p></div></div>
       </div>
     </section>
 
     <section class="setup-section" id="install" aria-labelledby="install-title">
       <div class="wrap setup-grid">
-        <div><p class="eyebrow">Install from source</p><h2 id="install-title">Build it on your Mac.</h2><p>Requires macOS 13+, the Codex desktop app, and Xcode Command Line Tools. Grant Accessibility access to Codex Model Bar when macOS asks.</p><p class="setup-small">The repo provides source code. There is no public signed or notarized download yet.</p></div>
+        <div><p class="eyebrow">Install from source</p><h2 id="install-title">Build it on your Mac.</h2><p>Requires macOS 13+, the Codex desktop app, and Xcode Command Line Tools. Grant Accessibility access to Codex Model Bar when macOS asks. Assign Codex shortcuts for increasing and decreasing reasoning effort to use the slider.</p><p class="setup-small">The repo provides source code. There is no public signed or notarized download yet.</p></div>
         <div class="command-block"><div class="command-header">Terminal <span>macOS</span></div><pre><code>git clone https://github.com/EthanSK/codex-model-bar.git
 cd codex-model-bar
 swift test

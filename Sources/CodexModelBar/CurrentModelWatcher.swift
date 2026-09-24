@@ -11,14 +11,14 @@ import CodexModelBarCore
 /// switched, window rebuilt), throttled to once every 3 s. Runs on `AX.queue`; results
 /// are delivered on the main thread.
 final class CurrentModelWatcher {
-    /// Called on the main thread with the current model id, or nil when unknown.
-    var onChange: ((String?) -> Void)?
+    /// Called on the main thread when the current model or effort changes.
+    var onChange: ((CurrentSelection) -> Void)?
 
     private var pid: pid_t?
     private var models: [CodexModel] = []
     private var timer: Timer?
     private var hasReported = false
-    private var lastReported: String?
+    private var lastReported: CurrentSelection?
 
     // Touched only on AX.queue.
     private var lastWalk = Date.distantPast
@@ -67,12 +67,12 @@ final class CurrentModelWatcher {
                 title = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
                     .modelButton.map(AX.title) ?? ""
             }
-            let id = CurrentModelMatcher.model(forTitle: title, among: models)?.id
+            let selection = CurrentModelMatcher.selection(forButtonTitle: title, among: models)
             DispatchQueue.main.async {
-                guard !self.hasReported || self.lastReported != id else { return }
+                guard !self.hasReported || self.lastReported != selection else { return }
                 self.hasReported = true
-                self.lastReported = id
-                self.onChange?(id)
+                self.lastReported = selection
+                self.onChange?(selection)
             }
         }
     }
