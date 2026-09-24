@@ -40,7 +40,7 @@ To switch, the bar opens Codex's own `/model` menu with Control+Shift+M. It choo
 
 ## Develop
 
-`swift test` runs the pure model parsing, title matching, draft-text and placement tests. `Sources/CodexModelBarCore` contains that testable logic. `Sources/CodexModelBar` contains the AppKit panel, Codex window tracking, model-menu interaction and reasoning shortcut control. `scripts/make-icon.swift` is the editable icon source. `LEARNINGS.md` records observed compatibility and testing lessons.
+`swift test` runs model parsing, title matching, draft-text, placement and AppKit bar-width tests. `Sources/CodexModelBarCore` contains the pure logic. `Sources/CodexModelBar` contains the AppKit panel, Codex window tracking, model-menu interaction and reasoning shortcut control. `scripts/make-icon.swift` is the editable icon source. `LEARNINGS.md` records observed compatibility and testing lessons.
 
 Contributions and issue reports are welcome. Please include the Codex desktop version and macOS version when reporting a model-switching problem, and remove personal task content from screenshots or logs.
 

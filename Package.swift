@@ -22,5 +22,9 @@ let package = Package(
             name: "CodexModelBarCoreTests",
             dependencies: ["CodexModelBarCore"]
         ),
+        .testTarget(
+            name: "CodexModelBarUITests",
+            dependencies: ["CodexModelBar", "CodexModelBarCore"]
+        ),
     ]
 )
