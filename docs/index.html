@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e9eff5">
+  <meta name="description" content="A thin macOS model bar that follows your Codex window and switches the open task in one click.">
+  <meta property="og:title" content="Codex Model Bar">
+  <meta property="og:description" content="Models, one click below Codex.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://ethansk.github.io/codex-model-bar/">
+  <meta property="og:image" content="https://ethansk.github.io/codex-model-bar/assets/app-icon.png">
+  <link rel="icon" type="image/png" href="assets/app-icon.png">
+  <link rel="stylesheet" href="styles.css?v=1">
+  <script src="script.js?v=1" defer></script>
+  <title>Codex Model Bar — models, one click below Codex</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="./" aria-label="Codex Model Bar home">
+      <img src="assets/app-icon.png" width="38" height="38" alt="">
+      <span>Codex Model Bar</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#how">How it works</a>
+      <a href="#install">Build</a>
+      <a class="source-link" href="https://github.com/EthanSK/codex-model-bar">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">macOS companion app · open source</p>
+        <h1 id="hero-title">Models, one click below Codex.</h1>
+        <p class="intro">A thin strip follows your Codex window. Pick the model for the open task without losing your place or your draft.</p>
+        <div class="hero-actions">
+          <a class="primary-action" href="#install">Build the app <span aria-hidden="true">↗</span></a>
+          <a class="secondary-action" href="https://github.com/EthanSK/codex-model-bar">Source on GitHub</a>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="app-window" aria-hidden="true">
+          <div class="window-top"><span class="traffic"><i></i><i></i><i></i></span><span>Codex</span><span class="window-top-end">⌘</span></div>
+          <div class="window-body"><div class="fake-sidebar"><span></span><span></span><span></span><span></span></div><div class="fake-task"><span class="task-line short"></span><span class="task-line"></span><span class="task-line middle"></span><div class="fake-composer"><span>Ask Codex anything</span><span class="composer-model">Opus 5.5</span></div></div></div>
+        </div>
+        <div class="preview-bar" role="group" aria-label="Model bar preview">
+          <button type="button" class="model-choice is-current" data-model="Opus 5.5" aria-pressed="true">Opus 5.5</button>
+          <button type="button" class="model-choice" data-model="Fable 5.1" aria-pressed="false">Fable 5.1</button>
+          <button type="button" class="model-choice" data-model="GPT-6 Sol" aria-pressed="false">GPT-6 Sol</button>
+          <button type="button" class="model-choice" data-model="GPT-6 Astra" aria-pressed="false">GPT-6 Astra</button>
+        </div>
+        <p class="preview-note"><span class="note-dot" aria-hidden="true"></span> Preview only · <span id="preview-status" aria-live="polite">Opus 5.5 selected in preview</span></p>
+      </div>
+    </section>
+
+    <section class="feature-section wrap" id="how" aria-labelledby="how-title">
+      <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="how-title">A shortcut that stays in sight.</h2></div>
+      <div class="feature-list">
+        <div class="feature"><span class="feature-mark">01</span><div><h3>Follows the window</h3><p>The 30-point bar sits under Codex when there is room, moves above it when needed, and hides when Codex is in the background.</p></div></div>
+        <div class="feature"><span class="feature-mark">02</span><div><h3>Fits your models</h3><p>The strip is only as wide as its visible buttons. Right-click it to hide models you do not use, refresh the list, or change Open at login.</p></div></div>
+        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's menu</h3><p>A click opens Codex's own <code>/model</code> menu, chooses the matching result, and checks that the open task changed model. It pauses while you type.</p></div></div>
+      </div>
+    </section>
+
+    <section class="setup-section" id="install" aria-labelledby="install-title">
+      <div class="wrap setup-grid">
+        <div><p class="eyebrow">Install from source</p><h2 id="install-title">Build it on your Mac.</h2><p>Requires macOS 13+, the Codex desktop app, and Xcode Command Line Tools. Grant Accessibility access to Codex Model Bar when macOS asks.</p><p class="setup-small">The repo provides source code. There is no public signed or notarized download yet.</p></div>
+        <div class="command-block"><div class="command-header">Terminal <span>macOS</span></div><pre><code>git clone https://github.com/EthanSK/codex-model-bar.git
+cd codex-model-bar
+swift test
+./scripts/build-app.sh</code></pre><a href="https://github.com/EthanSK/codex-model-bar#install-from-source">Full setup and signing notes <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </section>
+
+    <section class="bridge-section wrap" aria-labelledby="bridge-title"><div class="bridge-icon" aria-hidden="true">↔</div><div><p class="eyebrow">Claude too</p><h2 id="bridge-title">Your Claude models can have buttons.</h2><p>With <a href="https://github.com/EthanSK/claude-in-codex">Claude in Codex</a> installed, its model entries appear beside the GPT models. The bar reads the same model list Codex shows in its picker.</p></div></section>
+  </main>
+
+  <footer class="site-footer"><div class="wrap footer-grid"><p>Codex Model Bar is an independent MIT-licensed side project by Ethan SK.</p><p>Uses Codex desktop interfaces that may change in an update. Not affiliated with OpenAI or Anthropic.</p><a href="https://github.com/EthanSK/codex-model-bar">GitHub <span aria-hidden="true">↗</span></a></div></footer>
+</body>
+</html>
