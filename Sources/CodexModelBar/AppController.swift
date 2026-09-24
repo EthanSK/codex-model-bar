@@ -121,9 +121,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         barView.showStatus(nil)
         reasoningSwitcher.setEffort(effort, model: model, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
-            self.barView.setBusyReasoning(false)
             switch result {
             case .changed:
+                self.barView.setCurrentSelection(CurrentSelection(modelID: model.id, effort: effort))
                 self.watcher.refreshSoon()
             case .cancelledForTyping:
                 self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
@@ -133,6 +133,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.barView.showStatus(reason, color: .systemOrange)
                 self.watcher.refreshSoon()
             }
+            self.barView.setBusyReasoning(false)
         }
     }
 
