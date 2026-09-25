@@ -1,5 +1,6 @@
 import Foundation
 import os
+import CodexModelBarCore
 
 /// App identity constants shared across files.
 enum AppInfo {
@@ -18,8 +19,11 @@ enum AppInfo {
 ///   log stream --predicate 'subsystem == "com.ethansk.codex-model-bar"'
 enum Log {
     private static let logger = Logger(subsystem: "com.ethansk.codex-model-bar", category: "app")
+    private static let file = DiagnosticLog(url: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Codex Model Bar/diagnostic.log"))
     static func info(_ message: String) {
         logger.info("\(message, privacy: .public)")
+        file.append(message)
     }
 }
 

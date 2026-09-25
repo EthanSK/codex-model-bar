@@ -76,14 +76,17 @@ final class ModelSwitcher {
         if !codex.isActive { codex.activate() }
         let pid = codex.processIdentifier
         AX.queue.async {
+            let attempt = String(UUID().uuidString.prefix(8))
+            Log.info("model-switch attempt=\(attempt) phase=start pid=\(pid) target=\(target.id)")
             guard Self.waitUntil(timeout: 1.0, { codex.isActive }) else {
+                Log.info("model-switch attempt=\(attempt) phase=finish result=inactive")
                 finish(.failed("Codex did not become active"))
                 return
             }
             AX.enableWebAccessibility(pid: pid)
             let started = Date()
             let result = Self.performSwitch(to: target, allModels: allModels, pid: pid)
-            Log.info("switch to \(target.id): \(result) in \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
+            Log.info("model-switch attempt=\(attempt) phase=finish target=\(target.id) result=\(result) elapsed=\(String(format: "%.2f", Date().timeIntervalSince(started)))s")
             finish(result)
         }
     }
@@ -93,13 +96,26 @@ final class ModelSwitcher {
     private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t) -> Result {
         // Step 1: current model and message box.
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
+        let initialFocus: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
         var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
-        if located.modelButton == nil || located.composer == nil {
-            located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+        if (located.modelButton == nil || located.composer == nil),
+           let initialFocus, AX.role(initialFocus) == kAXTextAreaRole as String {
+            Log.info("model-switch phase=wait-for-composer input=\(CodexUI.identity(initialFocus))")
+            // A newly opened side task briefly exposes its input before the model
+            // control. Wait for that same input, without retargeting a later focus.
+            if let ready = poll(timeout: 1.0, { () -> CodexUI.Located? in
+                guard isFocused(initialFocus, pid: pid) else { return nil }
+                let candidate = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+                guard candidate.modelButton != nil, let input = candidate.composer, CFEqual(input, initialFocus)
+                else { return nil }
+                return candidate
+            }) { located = ready }
         }
         guard let button = located.modelButton, let composer = located.composer else {
+            Log.info("model-switch phase=locate-failed \(CodexUI.lookupDiagnostic)")
             return .failed("model button or message box not found (no chat composer on screen?)")
         }
+        Log.info("model-switch phase=located composer=\(CodexUI.identity(composer)) button=\(CodexUI.identity(button))")
         let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
         if current.modelID == target.id {
             return .alreadyCurrent(current)
@@ -108,6 +124,7 @@ final class ModelSwitcher {
         // Step 2: open the /model menu, unless the user already has it open.
         var menu = CodexUI.modelMenu(near: composer)
         if menu == nil {
+            Log.info("model-switch phase=open-menu shortcut=control-shift-m")
             guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
             guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskShift], pid: pid) else {
                 return .cancelledForTyping
@@ -288,10 +305,7 @@ final class ModelSwitcher {
     }
 
     private static func isFocused(_ element: AXUIElement, pid: pid_t) -> Bool {
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
-        let app = AXUIElementCreateApplication(pid)
-        guard let current: AXUIElement = AX.attribute(app, kAXFocusedUIElementAttribute) else { return false }
-        return CFEqual(current, element)
+        CodexUI.composerHasFocus(element, pid: pid)
     }
 
     // MARK: - Polling helpers

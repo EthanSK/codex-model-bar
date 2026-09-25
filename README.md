@@ -37,6 +37,7 @@ To switch, the bar opens Codex's own `/model` menu with Control+Shift+M. It choo
 
 - The bar works with the macOS Codex desktop app. It uses the app's Accessibility tree, window list, bundled app-server and `/model` menu. Codex updates can change those interfaces and require a bar update.
 - Accessibility access allows the app to inspect Codex's window and composer. The model switcher reads the draft before and after a search to preserve it. The reasoning control reads only the composer's model and effort title. It does not store chat text or include telemetry. It stores your hidden-button choices in macOS preferences and caches model names and supported effort levels locally in Application Support.
+- Diagnostics stay on your Mac at `~/Library/Logs/Codex Model Bar/diagnostic.log`. They record app version, model/effort, opaque input identities, focus flags, lookup decisions, switch stages, timing and failure reasons. They exclude draft text, chat content, task titles and individual keystrokes. The current log and one previous log are each limited to 2 MiB and readable only by your macOS user. Include the relevant failure entries when reporting a problem; nothing is uploaded automatically.
 - A switch can stop when Codex is not ready, its menu has changed, or you are actively typing. The strip reports the failure. If it cannot safely remove its search text, it tells you exactly what remains in the message box.
 - The source build is signed locally. It is not a notarized public binary release.
 

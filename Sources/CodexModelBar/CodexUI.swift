@@ -28,23 +28,57 @@ enum CodexUI {
         var composer: AXUIElement?
     }
 
+    // Accessed only on AX.queue. Avoid repeating unchanged polling diagnostics.
+    private static var lastDiagnostic = ""
+    private static var lastDiagnosticAt = Date.distantPast
+    static var lookupDiagnostic = "not-read"
+
+    static func identity(_ element: AXUIElement?) -> String {
+        guard let element else { return "none" }
+        return "\(AX.role(element))#\(String(CFHash(element), radix: 16))"
+    }
+
+    /// Chromium can temporarily expose a group/web area as app focus while the
+    /// input itself retains AXFocused. Never accept a different focused input.
+    static func composerHasFocus(_ composer: AXUIElement, pid: pid_t) -> Bool {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        else { return false }
+        if CFEqual(focused, composer) { return true }
+        return [kAXGroupRole as String, kAXWindowRole as String, "AXWebArea"].contains(AX.role(focused))
+            && AX.isFocused(composer)
+    }
+
     /// Resolve the focused input first, then a still-attached previous input.
     /// Multiple composers without either identity are deliberately ambiguous.
     static func locate(in window: AXUIElement, models: [CodexModel], previousComposer: AXUIElement?) -> Located {
         var pid: pid_t = 0
         guard AXUIElementGetPid(window, &pid) == .success else { return Located() }
         let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        var trace: [String] = []
+        var inputFlags: Set<String> = []
         let resolver = ComposerLocator<AXUIElement>(
             children: AX.children, parent: AX.parent,
-            isTextArea: { AX.role($0) == kAXTextAreaRole as String },
+            isTextArea: {
+                let isInput = AX.role($0) == kAXTextAreaRole as String
+                if isInput { inputFlags.insert("\(identity($0)):focused=\(AX.isFocused($0))") }
+                return isInput
+            },
             isModelButton: {
                 AX.role($0) == kAXPopUpButtonRole as String
                     && CurrentModelMatcher.isModelButtonTitle(AX.title($0), among: models)
-            }, equals: { CFEqual($0, $1) }
+            }, equals: { CFEqual($0, $1) }, hasKeyboardFocus: AX.isFocused,
+            diagnostic: { if trace.count < 40 { trace.append($0) } }
         )
-        guard let result = resolver.locate(in: window, focused: focused, previousComposer: previousComposer) else {
-            return Located()
+        let result = resolver.locate(in: window, focused: focused, previousComposer: previousComposer)
+        let selection = CurrentModelMatcher.selection(forButtonTitle: result.map { AX.title($0.modelButton) } ?? "", among: models)
+        lookupDiagnostic = "window=\(identity(window)) focused=\(identity(focused)) previous=\(identity(previousComposer)) selected=\(identity(result?.composer)) model=\(selection.modelID ?? "none") effort=\(selection.effort ?? "none") inputs=[\(inputFlags.sorted().joined(separator: ","))] trace=[\(trace.joined(separator: ";"))]"
+        if lookupDiagnostic != lastDiagnostic || Date().timeIntervalSince(lastDiagnosticAt) > 10 {
+            Log.info("composer-lookup \(lookupDiagnostic)")
+            lastDiagnostic = lookupDiagnostic
+            lastDiagnosticAt = Date()
         }
+        guard let result else { return Located() }
         return Located(modelButton: result.modelButton, composer: result.composer)
     }
 
@@ -127,9 +161,8 @@ enum CodexUI {
         static func current(window: AXUIElement, models: [CodexModel], forceRefresh: Bool = false) -> Located {
             if !forceRefresh, let cachedWindow = windowForLocated, CFEqual(cachedWindow, window),
                let button = located.modelButton,
-               Date().timeIntervalSince(lastLocatedAt) < 1.0,
+               Date().timeIntervalSince(lastLocatedAt) < 0.5,
                CurrentModelMatcher.isModelButtonTitle(AX.title(button), among: models),
-               AX.isDescendant(button, of: window),
                !focusMoved(window: window) {
                 return located
             }

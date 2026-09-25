@@ -17,7 +17,10 @@ final class ReasoningSwitcher {
                    completion: @escaping (Result) -> Void) {
         guard !busy else { return }
         busy = true
+        let attempt = String(UUID().uuidString.prefix(8))
+        Log.info("reasoning-switch attempt=\(attempt) phase=start model=\(model.id) effort=\(target)")
         let finish: (Result) -> Void = { result in
+            Log.info("reasoning-switch attempt=\(attempt) phase=finish result=\(result)")
             DispatchQueue.main.async {
                 self.busy = false
                 completion(result)
@@ -54,17 +57,13 @@ final class ReasoningSwitcher {
             }
             AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             guard ModelSwitcher.waitUntil(timeout: 0.6, {
-                let app = AXUIElementCreateApplication(pid)
-                guard let focused: AXUIElement = AX.attribute(app, kAXFocusedUIElementAttribute) else { return false }
-                return CFEqual(focused, composer)
+                CodexUI.composerHasFocus(composer, pid: pid)
             }) else { finish(.failed("Could not focus the task composer")); return }
 
             let ascending = to > from
             let shortcut = ascending ? shortcuts.increase : shortcuts.decrease
             for next in stride(from: from + (ascending ? 1 : -1), through: to, by: ascending ? 1 : -1) {
-                guard codex.isActive,
-                      let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
-                      CFEqual(focused, composer) else {
+                guard CodexUI.composerHasFocus(composer, pid: pid) else {
                     finish(.failed("The task composer lost focus")); return
                 }
                 guard Keyboard.pressUnlessTyping(shortcut.keyCode, flags: shortcut.flags, pid: pid) else {
@@ -72,9 +71,7 @@ final class ReasoningSwitcher {
                 }
                 let expected = model.supportedEfforts[next]
                 let confirmed = ModelSwitcher.waitUntil(timeout: 1.2) {
-                    guard codex.isActive,
-                          let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
-                          CFEqual(focused, composer) else { return false }
+                    guard CodexUI.composerHasFocus(composer, pid: pid) else { return false }
                     let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
                     guard let currentComposer = located.composer, CFEqual(currentComposer, composer),
                           let button = located.modelButton else { return false }

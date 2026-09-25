@@ -44,19 +44,6 @@ enum AX {
         attribute(element, kAXParentAttribute)
     }
 
-    /// Removed Chromium nodes can retain their old title. Require a live parent
-    /// chain to the current window before reusing one.
-    static func isDescendant(_ element: AXUIElement, of root: AXUIElement) -> Bool {
-        var node = element
-        for _ in 0..<40 {
-            if CFEqual(node, root) { return true }
-            guard let parent = parent(node), !CFEqual(parent, node),
-                  children(parent).contains(where: { CFEqual($0, node) }) else { return false }
-            node = parent
-        }
-        return false
-    }
-
     /// The element's own focused flag (for a text area: it has the caret).
     static func isFocused(_ element: AXUIElement) -> Bool {
         attribute(element, kAXFocusedAttribute) ?? false

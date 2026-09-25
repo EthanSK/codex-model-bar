@@ -25,6 +25,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Log.info("startup version=\(AppInfo.version) build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "dev") pid=\(ProcessInfo.processInfo.processIdentifier)")
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
         barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }

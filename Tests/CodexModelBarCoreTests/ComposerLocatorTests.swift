@@ -11,13 +11,15 @@ final class ComposerLocatorTests: XCTestCase {
         var parents: [String: String] = [:]
         let inputs = Set(["main-input", "side-input", "editor"])
         var models = Set(["main-model", "side-model"])
+        var focusedInputs: Set<String> = []
         init() {
             for (parent, nodes) in children { for node in nodes { parents[node] = parent } }
         }
         var locator: ComposerLocator<String> {
             ComposerLocator(children: { self.children[$0] ?? [] }, parent: { self.parents[$0] },
                             isTextArea: { self.inputs.contains($0) },
-                            isModelButton: { self.models.contains($0) }, equals: ==)
+                            isModelButton: { self.models.contains($0) }, equals: ==,
+                            hasKeyboardFocus: { self.focusedInputs.contains($0) })
         }
     }
 
@@ -72,5 +74,32 @@ final class ComposerLocatorTests: XCTestCase {
         attachments.forEach { tree.parents[$0] = "main" }
         XCTAssertEqual(tree.locator.locate(in: "window", focused: "main-input", previousComposer: "side-input")?.composer,
                        "main-input")
+    }
+
+    func testFlattenedParentsDoNotRejectTheFocusedSideComposer() {
+        let tree = Tree()
+        // The input is listed directly under side, but its AXParent reports an
+        // intermediate group omitted from side's AXChildren (Chromium flattening).
+        tree.parents["side-input"] = "omitted-group"
+        tree.parents["omitted-group"] = "side"
+        tree.children["omitted-group"] = ["side-input"]
+        XCTAssertEqual(tree.locator.locate(in: "window", focused: "side-input", previousComposer: "main-input")?.composer,
+                       "side-input")
+    }
+
+    func testInputFocusFlagWinsOverRememberedComposerWhenAppFocusIsAContainer() {
+        let tree = Tree()
+        tree.focusedInputs = ["side-input"]
+        XCTAssertEqual(tree.locator.locate(in: "window", focused: "window", previousComposer: "main-input")?.composer,
+                       "side-input")
+        tree.focusedInputs.insert("main-input")
+        XCTAssertNil(tree.locator.locate(in: "window", focused: "window", previousComposer: "main-input"))
+    }
+
+    func testLoadingSideInputCannotRedirectItsFocusFlagToTheMainTask() {
+        let tree = Tree()
+        tree.models.remove("side-model")
+        tree.focusedInputs = ["side-input"]
+        XCTAssertNil(tree.locator.locate(in: "window", focused: "window", previousComposer: "main-input"))
     }
 }
