@@ -2,9 +2,9 @@ import Foundation
 
 /// One model the Codex desktop app offers in its model picker.
 ///
-/// The values come straight from Codex's own backend (`model/list` on the
-/// bundled `codex app-server`), so the bar shows exactly what Codex's picker
-/// would show — including custom entries such as the Claude bridge models.
+/// Values come from Codex's cache or `model/list` on its bundled app-server,
+/// including custom entries such as the Claude bridge models. The bar retains
+/// previously observed entries through incomplete catalogue refreshes.
 public struct CodexModel: Codable, Equatable, Hashable, Sendable {
     /// The model slug Codex uses internally, e.g. `gpt-6-sol` or `claude-opus-5-5`.
     /// The bar uses this as the stable identity for a model button.
@@ -17,7 +17,7 @@ public struct CodexModel: Codable, Equatable, Hashable, Sendable {
     /// because it adds information the button label does not already show).
     public var description: String
     /// Hidden models exist in the catalogue but Codex keeps them out of its picker,
-    /// so the bar never offers them either.
+    /// so the bar respects an observed hidden flag as well.
     public var hidden: Bool
     /// Effort levels the picker exposes, in increasing order.
     public var supportedEfforts: [String]
@@ -79,12 +79,12 @@ public enum CodexModelParsing {
         return (models, (cursor?.isEmpty ?? true) ? nil : cursor)
     }
 
-    /// Parses Codex's on-disk `~/.codex/models_cache.json` as a fallback when the
-    /// backend cannot be queried (e.g. the bundled binary moved after an update).
+    /// Parses Codex's shared on-disk `~/.codex/models_cache.json` observations.
     ///
     /// The cache uses snake_case and a `visibility` field ("list" = shown in the
-    /// picker, "hide" = hidden). It can lag behind the desktop app's catalogue,
-    /// so it is only ever a fallback, never the primary source.
+    /// picker, "hide" = hidden). It can omit entries the desktop still offers;
+    /// callers must merge it with saved observations rather than treating absence
+    /// as a deletion.
     public static func parseModelsCache(_ data: Data) -> [CodexModel] {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

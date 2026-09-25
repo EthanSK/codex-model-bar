@@ -39,8 +39,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         // Instant startup from the cached list, then refresh from Codex itself.
         applyModels(catalog.loadCachedModels())
         refreshModels()
-        // The desktop app rewrites this cache after sign-in, account changes, and
-        // bridge recovery. Watch that file so the buttons follow without a restart.
+        // Codex clients share this cache. Merge new observations after sign-in or
+        // refresh without discarding models missing from one client's snapshot.
         lastCodexCacheModification = catalog.codexCacheModificationDate
         cacheWatchTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -120,6 +120,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         // Keep them available to the reader and slider, while hiding their buttons.
         allModels = models
         let hidden = Preferences.hiddenModelIDs
+        Log.info("catalog-apply known=[\(models.map(\.id).joined(separator: ","))] visible=[\(models.filter { !$0.hidden && !hidden.contains($0.id) }.map(\.id).joined(separator: ","))]")
         barView.setCatalogModels(allModels)
         barView.setModels(allModels.filter { !$0.hidden && !hidden.contains($0.id) })
         watcher.update(pid: tracker.snapshot.codexIsFrontmost ? tracker.snapshot.codexPID : nil, models: allModels)

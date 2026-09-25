@@ -3,16 +3,16 @@ import CodexModelBarCore
 
 /// Loads the list of models to show as buttons.
 ///
-/// Source of truth: the model cache written by the running Codex app. A separate
-/// `codex app-server` can return a different catalogue while Codex signs in, so
-/// its `model/list` response is only a fallback when the app cache is unavailable.
-///
-/// Fallbacks are our last good list for startup, then a short-lived
-/// `codex app-server` request when the app cache is unavailable.
+/// Codex's shared cache can temporarily omit models that are still in use in
+/// the desktop. Merge observations into the bar's saved catalogue: absence is
+/// not a deletion. Explicit hidden flags and the user's show/hide choices apply.
 final class ModelCatalogService {
     /// Where the last successful list is cached between launches.
     private let cacheURL: URL
     private let codexCacheURL: URL
+    /// Serialise refresh/read/write so an older concurrent response cannot
+    /// overwrite a newer, more complete saved catalogue.
+    private let queue = DispatchQueue(label: "com.ethansk.codex-model-bar.catalog", qos: .utility)
 
     init(cacheURL: URL? = nil, codexCacheURL: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -32,33 +32,58 @@ final class ModelCatalogService {
         return CodexModelParsing.parseModelsCache(data)
     }
 
-    /// Prefer the running app's catalogue over a previous bar snapshot.
-    func loadCachedModels() -> [CodexModel] {
-        let codexModels = Self.readCodexCache(at: codexCacheURL)
-        if !codexModels.isEmpty { return codexModels }
-        if let data = try? Data(contentsOf: cacheURL),
-           let models = try? JSONDecoder().decode([CodexModel].self, from: data),
-           !models.isEmpty {
-            return models
-        }
-        return []
+    private func readSavedModels() -> [CodexModel] {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let models = try? JSONDecoder().decode([CodexModel].self, from: data) else { return [] }
+        return models
     }
 
-    /// Refreshes from the app cache, falling back to app-server if it is missing.
-    /// `nil` means both sources failed; the caller keeps its existing buttons.
+    private func save(_ models: [CodexModel]) {
+        guard !models.isEmpty, let data = try? JSONEncoder().encode(models) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
+    }
+
+    /// Refresh metadata for observed entries, retaining missing entries and their
+    /// positions. A short-lived cache rewrite must not erase buttons or the names
+    /// used to recognise the focused composer's model control.
+    static func merge(saved: [CodexModel], observed: [CodexModel]) -> [CodexModel] {
+        var result = saved
+        for model in observed {
+            if let index = result.firstIndex(where: { $0.id == model.id }) {
+                result[index] = model
+            } else {
+                result.append(model)
+            }
+        }
+        return result
+    }
+
+    func loadCachedModels() -> [CodexModel] {
+        queue.sync {
+            let models = Self.merge(saved: readSavedModels(), observed: Self.readCodexCache(at: codexCacheURL))
+            save(models)
+            return models
+        }
+    }
+
+    /// Merge shared-cache observations, falling back to app-server if it is missing.
+    /// `nil` means no source or saved catalogue is available.
     func refresh(codexAppURL: URL?, completion: @escaping ([CodexModel]?) -> Void) {
-        DispatchQueue.global(qos: .utility).async { [cacheURL, codexCacheURL] in
+        queue.async { [self] in
+            let saved = readSavedModels()
             let current = Self.readCodexCache(at: codexCacheURL)
             let fetched = current.isEmpty ? Self.fetchFromAppServer(codexAppURL: codexAppURL) : nil
             // The real app may finish signing in while the fallback request runs.
             let latest = Self.readCodexCache(at: codexCacheURL)
-            let models = latest.isEmpty ? (current.isEmpty ? fetched : current) : latest
-            if let models, !models.isEmpty,
-               let data = try? JSONEncoder().encode(models) {
-                // Atomic write so a crash mid-write never leaves a half-written cache.
-                try? data.write(to: cacheURL, options: .atomic)
-            }
-            DispatchQueue.main.async { completion(models) }
+            // Keep every successful observation, even if the shared file changes
+            // again during this refresh. Later metadata wins for the same id.
+            let observed = Self.merge(saved: fetched ?? [], observed: Self.merge(saved: current, observed: latest))
+            let models = Self.merge(saved: saved, observed: observed)
+            let observedIDs = Set(observed.map(\.id))
+            let retained = saved.filter { !observedIDs.contains($0.id) }.map(\.id)
+            Log.info("catalog-refresh observed=[\(observed.map(\.id).joined(separator: ","))] retained=[\(retained.joined(separator: ","))] total=\(models.count)")
+            save(models)
+            DispatchQueue.main.async { completion(models.isEmpty ? nil : models) }
         }
     }
 

@@ -6,7 +6,13 @@ These observations describe the macOS Codex desktop interfaces the bar currently
 
 On 2026-09-25, the running bar saved a GPT-only `model/list` response while Codex was signed out or reconnecting. It hid Opus and Fable and showed GPT-5.6 models that the Claude bridge normally hides. After login, Codex's own `~/.codex/models_cache.json` listed Opus and Fable again and marked GPT-5.6 hidden; a fresh standalone `app-server` request also returned the Claude models. The bridge was healthy throughout inspection, so its startup was not the demonstrated cause.
 
-Use the model cache written by the running Codex app as the bar's primary catalogue. Watch that file for changes so a sign-in refresh updates the buttons without restarting the bar. Keep the bar's last good list for startup and query a standalone `app-server` only when Codex's cache is unavailable. A regression test starts with an older GPT-only bar snapshot and verifies that the app cache restores Claude and hidden-model visibility.
+Use Codex's shared model cache for catalogue observations, with a standalone `app-server` fallback when the cache is unavailable. Watch it for changes so sign-in updates appear without restarting the bar. Merge observations into the bar's saved list rather than replacing it (see the 1.2.6 finding below). A regression test starts with an older GPT-only bar snapshot and verifies that the shared cache restores Claude and explicit hidden-model visibility.
+
+### 1.2.6: a shared-cache omission is not a removed model
+
+On 2026-09-25 the user captured a bar showing only Opus and Fable while the Codex composer visibly used GPT-6 Sol High. At inspection, `models_cache.json` omitted all three GPT-6 models; a later rewrite restored them. The bar had persisted the smaller list over its own full snapshot. Because the same catalogue recognises model-button titles, the omission also made a focused Sol composer unrecognisable and produced `models=0` / `unpaired-focused-input` switch failures. The user's hidden choices still contained only GPT-5.5 and Luna. No evidence identified which process wrote the incomplete snapshot.
+
+Retain previously observed entries and their order when a refresh omits them, including across bar restarts. Update metadata and explicit hidden flags for entries actually present, and keep user show/hide preferences separate. Serialise catalogue refreshes and atomic persistence. Log observed, retained and displayed model IDs so catalogue loss can be distinguished from an AX focus failure without recording chat content. A regression replays a full four-button catalogue followed by a Claude-only snapshot, verifies Sol title/effort recognition, and restarts the service while that partial snapshot remains. Another test verifies explicit hiding and reasoning metadata updates still apply.
 
 ## Codex's `/model` menu
 
