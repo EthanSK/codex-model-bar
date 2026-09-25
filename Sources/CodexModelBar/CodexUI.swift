@@ -26,6 +26,11 @@ enum CodexUI {
     struct Located {
         var modelButton: AXUIElement?
         var composer: AXUIElement?
+        var scopeAncestors: [AXUIElement] = []
+
+        var identity: ComposerIdentity<AXUIElement>? {
+            composer.map { ComposerIdentity(input: $0, scopeAncestors: scopeAncestors) }
+        }
     }
 
     // Accessed only on AX.queue. Avoid repeating unchanged polling diagnostics.
@@ -79,12 +84,60 @@ enum CodexUI {
             lastDiagnosticAt = Date()
         }
         guard let result else { return Located() }
-        return Located(modelButton: result.modelButton, composer: result.composer)
+        return Located(modelButton: result.modelButton, composer: result.composer,
+                       scopeAncestors: result.scopeAncestors)
     }
 
     /// The message box's real text (its placeholder counts as empty).
-    static func composerText(_ composer: AXUIElement) -> String {
-        ComposerText.visibleText(value: AX.string(composer, kAXValueAttribute), placeholder: AX.title(composer))
+    static func composerText(_ composer: AXUIElement) -> String? {
+        guard AX.role(composer) == kAXTextAreaRole as String,
+              let value: String = AX.attribute(composer, kAXValueAttribute) else { return nil }
+        return ComposerText.visibleText(value: value, placeholder: AX.title(composer))
+    }
+
+    /// Confirmation is read-only. Re-read the live tree even when the old input
+    /// stops answering AX calls; otherwise a remount can never be discovered.
+    /// User input or a window change ends the attempt rather than retargeting it.
+    struct ConfirmedSelection {
+        let located: Located
+        let selection: CurrentSelection
+    }
+
+    static func confirmSelection(modelID: String, effort: String? = nil, original: Located,
+                                 window: AXUIElement, pid: pid_t, models: [CodexModel],
+                                 since started: TimeInterval, timeout: TimeInterval = 5,
+                                 logPrefix: String) -> ConfirmedSelection? {
+        guard let identity = original.identity else { return nil }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var lastState = ""
+        repeat {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  let activeWindow = AX.focusedWindow(pid: pid), CFEqual(activeWindow, window),
+                  !Keyboard.userInteracted(since: started) else {
+                Log.info("\(logPrefix) phase=confirm-stopped reason=user-or-window-changed")
+                return nil
+            }
+            let located = Cache.current(window: window, models: models, forceRefresh: true)
+            let selection = CurrentModelMatcher.selection(forButtonTitle: located.modelButton.map(AX.title) ?? "",
+                                                           among: models)
+            let sameContext = located.identity.map { identity.matches($0, equals: { CFEqual($0, $1) }) } ?? false
+            let focused = located.composer.map { composerHasFocus($0, pid: pid) } ?? false
+            let replaced = located.composer.map { !CFEqual($0, identity.input) } ?? false
+            let state = "input=\(self.identity(located.composer)) original=\(self.identity(identity.input)) sameContext=\(sameContext) focused=\(focused) replaced=\(replaced) model=\(selection.modelID ?? "none") effort=\(selection.effort ?? "none") scopes=[\(located.scopeAncestors.map(self.identity).joined(separator: ","))]"
+            if state != lastState {
+                Log.info("\(logPrefix) phase=confirm \(state)")
+                lastState = state
+            }
+            if sameContext, focused, selection.modelID == modelID,
+               effort == nil || selection.effort == effort,
+               !Keyboard.userInteracted(since: started) {
+                Log.info("\(logPrefix) phase=confirmed replaced=\(replaced)")
+                return ConfirmedSelection(located: located, selection: selection)
+            }
+            usleep(40_000)
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        Log.info("\(logPrefix) phase=confirm-timeout")
+        return nil
     }
 
     // MARK: - The `/model` menu

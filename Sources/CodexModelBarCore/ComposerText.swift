@@ -7,6 +7,16 @@ import Foundation
 /// helpers decide whether that search can be removed again without touching anything
 /// the user wrote.
 public enum ComposerText {
+    public enum CleanupState { case restored, remaining, unverified }
+
+    /// An unavailable AX value is unknown, never an empty draft or evidence that
+    /// the bar's text remains. Only claim leftovers when the exact insertion is read.
+    public static func cleanupState(_ typed: String, before: String, after: String?) -> CleanupState {
+        guard let after else { return .unverified }
+        if after == before { return .restored }
+        return onlyAdded(typed, before: before, after: after) ? .remaining : .unverified
+    }
+
     /// The message box's real text, given its Accessibility value and placeholder.
     ///
     /// When the box is empty, Chromium reports the placeholder paragraph as the value

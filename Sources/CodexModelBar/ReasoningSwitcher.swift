@@ -37,8 +37,8 @@ final class ReasoningSwitcher {
             guard let window = AX.focusedWindow(pid: pid) else {
                 finish(.failed("No Codex window")); return
             }
-            let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
-            guard let composer = located.composer, let button = located.modelButton else {
+            var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+            guard var composer = located.composer, let button = located.modelButton else {
                 finish(.failed("No task composer")); return
             }
             let before = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
@@ -66,21 +66,18 @@ final class ReasoningSwitcher {
                 guard CodexUI.composerHasFocus(composer, pid: pid) else {
                     finish(.failed("The task composer lost focus")); return
                 }
+                let changedAt = ProcessInfo.processInfo.systemUptime
                 guard Keyboard.pressUnlessTyping(shortcut.keyCode, flags: shortcut.flags, pid: pid) else {
                     finish(.cancelledForTyping); return
                 }
                 let expected = model.supportedEfforts[next]
-                let confirmed = ModelSwitcher.waitUntil(timeout: 1.2) {
-                    guard CodexUI.composerHasFocus(composer, pid: pid) else { return false }
-                    let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
-                    guard let currentComposer = located.composer, CFEqual(currentComposer, composer),
-                          let button = located.modelButton else { return false }
-                    let state = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
-                    return state.modelID == model.id && state.effort == expected
-                }
-                guard confirmed else {
+                guard let confirmed = CodexUI.confirmSelection(modelID: model.id, effort: expected,
+                    original: located, window: window, pid: pid, models: allModels, since: changedAt,
+                    logPrefix: "reasoning-switch attempt=\(attempt)") else {
                     finish(.failed("Codex did not confirm the new reasoning level")); return
                 }
+                located = confirmed.located
+                composer = confirmed.located.composer!
             }
             finish(.changed)
         }

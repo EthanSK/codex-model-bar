@@ -9,7 +9,7 @@ final class ComposerLocatorTests: XCTestCase {
             "side": ["side-input", "side-tools"], "side-tools": ["side-model"],
         ]
         var parents: [String: String] = [:]
-        let inputs = Set(["main-input", "side-input", "editor"])
+        var inputs = Set(["main-input", "side-input", "editor"])
         var models = Set(["main-model", "side-model"])
         var focusedInputs: Set<String> = []
         init() {
@@ -101,5 +101,50 @@ final class ComposerLocatorTests: XCTestCase {
         tree.models.remove("side-model")
         tree.focusedInputs = ["side-input"]
         XCTAssertNil(tree.locator.locate(in: "window", focused: "window", previousComposer: "main-input"))
+    }
+
+    func testSideInputReplacementCannotConfirmAgainstTheOtherTask() throws {
+        let tree = Tree()
+        let original = try XCTUnwrap(tree.locator.locate(in: "window", focused: "side-input", previousComposer: nil))
+        let identity = ComposerIdentity(input: original.composer, scopeAncestors: original.scopeAncestors)
+        XCTAssertEqual(original.scopeAncestors, ["side"])
+        // Recorded failure: side input detaches after choosing Opus; the main
+        // input already uses Opus and briefly becomes the sole candidate.
+        tree.children["side"] = []
+        let other = try XCTUnwrap(tree.locator.locate(in: "window", focused: nil, previousComposer: "side-input"))
+        XCTAssertEqual(other.composer, "main-input")
+        XCTAssertFalse(identity.matches(ComposerIdentity(input: other.composer, scopeAncestors: other.scopeAncestors), equals: ==))
+        // The same side scope then receives a new input and a new model button.
+        tree.children["side"] = ["new-input", "new-model"]
+        tree.parents["new-input"] = "side"
+        tree.parents["new-model"] = "side"
+        tree.inputs.insert("new-input")
+        tree.models.insert("new-model")
+        let replacement = try XCTUnwrap(tree.locator.locate(in: "window", focused: "new-input", previousComposer: "side-input"))
+        XCTAssertTrue(identity.matches(ComposerIdentity(input: replacement.composer, scopeAncestors: replacement.scopeAncestors), equals: ==))
+    }
+
+    func testReplacementNeedsASurvivingExclusiveScopeFromTheLiveTree() throws {
+        let tree = Tree()
+        tree.children["side-shell"] = ["side"]
+        tree.parents["side"] = "side-shell"
+        tree.children["window"] = ["main", "side-shell", "editor"]
+        tree.parents["side-shell"] = "window"
+        let original = try XCTUnwrap(tree.locator.locate(in: "window", focused: "side-input", previousComposer: nil))
+        XCTAssertEqual(original.scopeAncestors, ["side", "side-shell"])
+        let identity = ComposerIdentity(input: original.composer, scopeAncestors: original.scopeAncestors)
+        tree.children["side-shell"] = ["new-input", "new-model"]
+        tree.inputs.insert("new-input")
+        tree.models.insert("new-model")
+        tree.parents["new-input"] = "side-shell"
+        tree.parents["new-model"] = "side-shell"
+        let replacement = try XCTUnwrap(tree.locator.locate(in: "window", focused: "new-input", previousComposer: nil))
+        XCTAssertTrue(identity.matches(ComposerIdentity(input: replacement.composer, scopeAncestors: replacement.scopeAncestors), equals: ==))
+        // Whole task subtree was replaced: matching placement/order or stale AX
+        // parents alone must not join the new task to the old one.
+        tree.children["window"] = ["main", "new-input", "new-model"]
+        let unrelated = try XCTUnwrap(tree.locator.locate(in: "window", focused: "new-input", previousComposer: nil))
+        XCTAssertTrue(unrelated.scopeAncestors.isEmpty)
+        XCTAssertFalse(identity.matches(ComposerIdentity(input: unrelated.composer, scopeAncestors: unrelated.scopeAncestors), equals: ==))
     }
 }

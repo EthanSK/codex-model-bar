@@ -34,6 +34,16 @@ The logs also recorded a newly focused side input before any model control appea
 
 Keep the last paired input identity across a temporary render gap, separately from the current read result. The next lookup must rediscover that input in the live window before using it, and a different focused input still wins. Clear the remembered identity when the window changes.
 
+### 1.2.5: side inputs can be replaced during confirmation
+
+The installed 1.2.4 log captured a recent-model selection after which the original side input stopped exposing its role and left the live tree. The old confirmation checked focus on that retained object before performing another lookup, so it could not discover a replacement. The other composer already used the requested model; its title was not evidence that the side task switched. In a separate search attempt, the log confirmed Sol in the original focused composer, then reported failure because the later draft read differed. That input was replaced shortly afterward. These are distinct verification failures; neither log proves that the search text actually remained in the draft.
+
+During confirmation, read the live tree first. Capture the input's live child-tree ancestors shared with its model control and containing no other input. A replacement can be matched only through a surviving exclusive ancestor, in the same active window, with focus, and without a new hardware key or mouse press. Do not infer continuity from matching models, window geometry, element order, or stale AX parent links. The same confirmation is used for reasoning steps. Allow a bounded five-second render gap and stop when the user interacts.
+
+Treat an unreadable AX text value as unknown, not an empty draft. Only report leftover search when the readable value proves exactly that insertion. Model confirmation and draft cleanup are separate facts: a confirmed model does not become a failed switch merely because a later draft read is unknown or changed. Never backspace into a replacement input or after intervening user activity. Regression fixtures replay the side disappearance, reject the other already-matching composer, accept a replacement in a surviving scope, and reject stale/shared scopes. Result tests cover the confirmed-model/unverified-draft case.
+
+Direct automation of Codex remains unavailable in this environment; fixtures and passive installed diagnostics are the available verification surfaces. Scope continuity must be recorded on a real replacement before claiming that path passed live.
+
 ### Local diagnostics
 
 Keep persistent bounded diagnostics in `~/Library/Logs/Codex Model Bar/diagnostic.log`, with one rotated previous file. Record startup version/build, attempt IDs, phase/result, elapsed time, model/effort, opaque AX identities and focus-resolution decisions. Do not log drafts, conversations, task titles or individual user keystrokes. Tests cover restart persistence, single-line entries, private permissions and bounded rotation. Existing macOS unified logs were enough to distinguish a composer lookup failure from typing cancellation, but did not reveal why the input was rejected.

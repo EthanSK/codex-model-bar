@@ -7,6 +7,9 @@ public struct ComposerLocator<Node> {
         public let modelButton: Node
         public let composer: Node
         public let container: Node
+        /// Live ancestors shared by this input and its model control, containing
+        /// no other input. A surviving ancestor can identify a replacement input.
+        public var scopeAncestors: [Node] = []
     }
 
     private let children: (Node) -> [Node]
@@ -34,17 +37,35 @@ public struct ComposerLocator<Node> {
         // Discover controls from the live window. Chromium's AXParent and
         // AXChildren are not necessarily reciprocal across flattened web groups.
         // Requiring that reciprocity rejects a valid focused side composer.
-        let scan = matching(in: root, limit: 30_000, maxMatches: Int.max) { isModelButton($0) || isTextArea($0) }
+        let scan = matching(in: root, limit: 30_000, maxMatches: Int.max, capturePaths: true) {
+            isModelButton($0) || isTextArea($0)
+        }
         let buttons = scan.nodes.filter(isModelButton)
         let inputs = scan.nodes.filter(isTextArea)
         let candidates = buttons.compactMap { pair($0, in: root) }
+        func scoped(_ candidate: Located) -> Located {
+            var result = candidate
+            guard scan.complete,
+                  let inputIndex = scan.nodes.firstIndex(where: { equals($0, candidate.composer) }),
+                  let buttonIndex = scan.nodes.firstIndex(where: { equals($0, candidate.modelButton) })
+            else { return result }
+            let otherInputPaths = scan.nodes.indices.filter { index in
+                inputs.contains(where: { equals($0, scan.nodes[index]) }) && !equals(scan.nodes[index], candidate.composer)
+            }.map { scan.paths[$0] }
+            result.scopeAncestors = scan.paths[inputIndex].reversed().filter { ancestor in
+                !equals(ancestor, root)
+                    && scan.paths[buttonIndex].contains(where: { equals($0, ancestor) })
+                    && !otherInputPaths.contains(where: { path in path.contains(where: { equals($0, ancestor) }) })
+            }
+            return result
+        }
         diagnostic("window-scan models=\(buttons.count) inputs=\(inputs.count) paired=\(candidates.count) complete=\(scan.complete)")
         let focusedInput = focused.map(isTextArea) ?? false
         if let focused, let active = candidates.first(where: {
             focusedInput ? equals(focused, $0.composer) : isWithin(focused, root: $0.container)
         }) {
             diagnostic("selected=focused-scan")
-            return active
+            return scoped(active)
         }
         if focusedInput { diagnostic("rejected=unpaired-focused-input"); return nil }
         let flagged = inputs.filter(hasKeyboardFocus)
@@ -54,17 +75,17 @@ public struct ComposerLocator<Node> {
                 return nil
             }
             diagnostic("selected=focused-flag")
-            return selected
+            return scoped(selected)
         }
         if flagged.count > 1 { diagnostic("rejected=multiple-focus-flags"); return nil }
         // Preserve input identity across a native picker, but only if the current
         // window scan still contains that same paired composer.
         if let previousComposer, let previous = candidates.first(where: { equals($0.composer, previousComposer) }) {
             diagnostic("selected=previous-live-composer")
-            return previous
+            return scoped(previous)
         }
         diagnostic(scan.complete && candidates.count == 1 ? "selected=sole-composer" : "rejected=ambiguous-or-missing")
-        return scan.complete && candidates.count == 1 ? candidates[0] : nil
+        return scan.complete && candidates.count == 1 ? scoped(candidates[0]) : nil
     }
 
     private func pair(_ button: Node, in root: Node) -> Located? {
@@ -96,20 +117,23 @@ public struct ComposerLocator<Node> {
         return false
     }
 
-    private func matching(in root: Node, limit: Int, maxMatches: Int,
-                          predicate: (Node) -> Bool) -> (nodes: [Node], complete: Bool) {
-        var stack = [root]
+    private func matching(in root: Node, limit: Int, maxMatches: Int, capturePaths: Bool = false,
+                          predicate: (Node) -> Bool) -> (nodes: [Node], paths: [[Node]], complete: Bool) {
+        var stack: [(node: Node, path: [Node])] = [(root, [])]
         var result: [Node] = []
+        var paths: [[Node]] = []
         var visited = 0
-        while let node = stack.popLast() {
+        while let (node, path) = stack.popLast() {
             visited += 1
-            guard visited <= limit else { return (result, false) }
+            guard visited <= limit else { return (result, paths, false) }
             if predicate(node) {
                 result.append(node)
-                if result.count >= maxMatches { return (result, false) }
+                paths.append(path)
+                if result.count >= maxMatches { return (result, paths, false) }
             }
-            stack.append(contentsOf: children(node).reversed())
+            let nextPath = capturePaths ? path + [node] : []
+            stack.append(contentsOf: children(node).reversed().map { ($0, nextPath) })
         }
-        return (result, true)
+        return (result, paths, true)
     }
 }
