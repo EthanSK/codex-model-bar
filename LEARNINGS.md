@@ -14,6 +14,8 @@ On 2026-09-25 the user captured a bar showing only Opus and Fable while the Code
 
 Retain previously observed entries and their order when a refresh omits them, including across bar restarts. Update metadata and explicit hidden flags for entries actually present, and keep user show/hide preferences separate. Serialise catalogue refreshes and atomic persistence. Log observed, retained and displayed model IDs so catalogue loss can be distinguished from an AX focus failure without recording chat content. A regression replays a full four-button catalogue followed by a Claude-only snapshot, verifies Sol title/effort recognition, and restarts the service while that partial snapshot remains. Another test verifies explicit hiding and reasoning metadata updates still apply.
 
+The installed 1.2.6 runtime subsequently observed repeated real cache omissions of GPT-6 and logged those entries as retained, with the same four visible models before and after. A Computer Use inspection of the companion bar itself showed Astra, Sol, Opus and Fable with the reasoning slider. This verifies retention through the actual failure trigger without injecting a cache change into Codex or driving its protected UI.
+
 ## Codex's `/model` menu
 
 In Codex desktop 26.917, Control+Shift+M opens the composer's `/model` menu without changing the draft. Number keys choose the first three recent configurations while the menu's search is empty. To find another model, the bar types the model id into the focused composer, waits until the menu exposes exactly one matching entry, and presses Return. The menu consumes Return and clears its search when selection succeeds. Accessibility `AXPress` and process-targeted clicks did not reliably choose menu entries in this version.
