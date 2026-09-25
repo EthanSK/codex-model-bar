@@ -22,6 +22,8 @@ A newly opened extra Codex window was not a reliable live-test target in the obs
 
 The 1.2.3 regression fixtures cover main/side focus, a native picker temporarily holding focus, replaced model buttons, and detached composers whose AX parent and title remain readable. Resolve the focused composer first; retain a previous composer only while it remains in the live tree. An unrecognised focused text area must never redirect an action to a remembered input. Multiple unpaired inputs are ambiguous, not a reason to choose the first one. Check focus before each synthetic key, including cleanup, and confirm against the same composer's freshly located button.
 
+An input with many attachment/control nodes can exceed the small subtree scan budget. A failing fixture with 220 neighbouring nodes demonstrated that returning unknown immediately misses a valid focused composer. Fall back to the bounded window scan, still requiring that the resulting composer contains the actual focus; do not substitute the previously focused side task.
+
 Keep one watcher read in flight and discard results from an older focus/window revision. Slow AX walks must not accumulate behind a timer or overwrite a completed model change. Focus notifications request a fresh lookup; periodic polling still detects changes made through Codex's own picker. A successful switch returns both model and effort so the bar does not temporarily reset its slider to unknown. Retain hidden catalogue entries for recognising an existing task even though their buttons stay hidden.
 
 ## Reasoning effort

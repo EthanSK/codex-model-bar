@@ -64,4 +64,13 @@ final class ComposerLocatorTests: XCTestCase {
             isModelButton: { $0 == "model" }, equals: ==)
         XCTAssertNil(locator.locate(in: "window", focused: "input-b", previousComposer: nil))
     }
+
+    func testFocusedComposerBeyondFastScanBudgetStillWins() {
+        let tree = Tree()
+        let attachments = (0..<220).map { "attachment-\($0)" }
+        tree.children["main"] = ["main-input"] + attachments + ["main-tools"]
+        attachments.forEach { tree.parents[$0] = "main" }
+        XCTAssertEqual(tree.locator.locate(in: "window", focused: "main-input", previousComposer: "side-input")?.composer,
+                       "main-input")
+    }
 }

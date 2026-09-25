@@ -27,12 +27,10 @@ public struct ComposerLocator<Node> {
 
     public func locate(in root: Node, focused: Node?, previousComposer: Node?) -> Located? {
         if let focused, isWithin(focused, root: root), let found = near(focused) { return found }
-        // An unrecognised focused text area might be a different task whose model
-        // is still loading. Never redirect its action to a remembered input.
-        if let focused, isTextArea(focused) { return nil }
+        let focusedInput = focused.map(isTextArea) ?? false
         // A native picker or a transcript click can temporarily own focus. Keep
         // the last input only if it still belongs to this window, and re-find its button.
-        if let previousComposer, isWithin(previousComposer, root: root),
+        if !focusedInput, let previousComposer, isWithin(previousComposer, root: root),
            let found = near(previousComposer) { return found }
 
         let scan = matching(in: root, limit: 30_000, maxMatches: Int.max, predicate: isModelButton)
@@ -40,6 +38,10 @@ public struct ComposerLocator<Node> {
         if let focused, let active = candidates.first(where: { isWithin(focused, root: $0.container) }) {
             return active
         }
+        // A large composer may exceed the quick scan's budget. Try the complete
+        // window above before treating a focused input as unrecognised; never
+        // redirect that input's action to another composer.
+        if focusedInput { return nil }
         return scan.complete && candidates.count == 1 ? candidates[0] : nil
     }
 
