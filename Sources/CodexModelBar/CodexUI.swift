@@ -156,9 +156,11 @@ enum CodexUI {
         /// The text area that had keyboard focus at the last walk (see `focusMoved`).
         private static var focusedAtLastWalk: AXUIElement?
         private static var lastLocatedAt = Date.distantPast
+        private static var rememberedComposer: AXUIElement?
 
         /// Returns cached elements when they still look right, otherwise re-locates.
         static func current(window: AXUIElement, models: [CodexModel], forceRefresh: Bool = false) -> Located {
+            if windowForLocated.map({ !CFEqual($0, window) }) ?? true { rememberedComposer = nil }
             if !forceRefresh, let cachedWindow = windowForLocated, CFEqual(cachedWindow, window),
                let button = located.modelButton,
                Date().timeIntervalSince(lastLocatedAt) < 0.5,
@@ -166,7 +168,10 @@ enum CodexUI {
                !focusMoved(window: window) {
                 return located
             }
-            located = locate(in: window, models: models, previousComposer: located.composer)
+            located = locate(in: window, models: models, previousComposer: rememberedComposer)
+            // A render gap should not erase the last input identity. The resolver
+            // still requires it to be paired in the next live window scan.
+            if let composer = located.composer { rememberedComposer = composer }
             windowForLocated = window
             focusedAtLastWalk = focusedTextArea(window: window)
             lastLocatedAt = Date()
@@ -197,6 +202,7 @@ enum CodexUI {
             located = Located()
             windowForLocated = nil
             focusedAtLastWalk = nil
+            rememberedComposer = nil
             lastLocatedAt = .distantPast
         }
     }

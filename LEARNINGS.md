@@ -32,6 +32,8 @@ During a real side-task transition, the app reported an `AXGroup` as its focused
 
 The logs also recorded a newly focused side input before any model control appeared. A switch now gives that exact focused input up to one second to expose its model button. If the user moves focus during that wait, it does not retarget the other input. Fixtures cover flattened parents, container focus, conflicting flags and an unpaired focused side input. Live focus logging verifies these states during normal use; direct automation of Codex remains unavailable in this environment.
 
+Keep the last paired input identity across a temporary render gap, separately from the current read result. The next lookup must rediscover that input in the live window before using it, and a different focused input still wins. Clear the remembered identity when the window changes.
+
 ### Local diagnostics
 
 Keep persistent bounded diagnostics in `~/Library/Logs/Codex Model Bar/diagnostic.log`, with one rotated previous file. Record startup version/build, attempt IDs, phase/result, elapsed time, model/effort, opaque AX identities and focus-resolution decisions. Do not log drafts, conversations, task titles or individual user keystrokes. Tests cover restart persistence, single-line entries, private permissions and bounded rotation. Existing macOS unified logs were enough to distinguish a composer lookup failure from typing cancellation, but did not reveal why the input was rejected.
