@@ -55,6 +55,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         watcher.onChange = { [weak self] selection in self?.barView.setCurrentSelection(selection) }
+        watcher.onFocusChange = { [weak self] in self?.barView.cancelReasoningPreview() }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start()
 
@@ -114,10 +115,12 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func applyModels(_ models: [CodexModel]) {
-        allModels = models.filter { !$0.hidden }
+        // Hidden catalogue entries can still be selected in an existing task.
+        // Keep them available to the reader and slider, while hiding their buttons.
+        allModels = models
         let hidden = Preferences.hiddenModelIDs
         barView.setCatalogModels(allModels)
-        barView.setModels(allModels.filter { !hidden.contains($0.id) })
+        barView.setModels(allModels.filter { !$0.hidden && !hidden.contains($0.id) })
         watcher.update(pid: tracker.snapshot.codexIsFrontmost ? tracker.snapshot.codexPID : nil, models: allModels)
         layout(for: tracker.snapshot)
     }
@@ -131,6 +134,7 @@ final class AppController: NSObject, NSApplicationDelegate {
               let model = allModels.first(where: { $0.id == modelID }) else { return }
         barView.setBusyReasoning(true)
         barView.showStatus(nil)
+        watcher.setSuspended(true)
         reasoningSwitcher.setEffort(effort, model: model, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -146,6 +150,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.watcher.refreshSoon()
             }
             self.barView.setBusyReasoning(false)
+            self.watcher.setSuspended(false)
         }
     }
 
@@ -157,12 +162,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let codex = tracker.codexApp else { return }
         barView.setBusyModel(id: model.id)
         barView.showStatus(nil)
+        watcher.setSuspended(true)
         switcher.switchModel(to: model, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
             self.barView.setBusyModel(id: nil)
             switch result {
-            case .switched, .alreadyCurrent:
-                self.barView.setCurrentModel(id: model.id)
+            case .switched(let selection), .alreadyCurrent(let selection):
+                self.barView.setCurrentSelection(selection)
                 self.watcher.refreshSoon()
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
@@ -180,6 +186,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.barView.showStatus("Failed to switch to \(model.displayName)", color: .systemRed)
                 self.watcher.refreshSoon()
             }
+            self.watcher.setSuspended(false)
         }
     }
 
@@ -217,7 +224,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let modelsItem = NSMenuItem(title: "Models", action: nil, keyEquivalent: "")
         let modelsMenu = NSMenu()
         let hidden = Preferences.hiddenModelIDs
-        for model in allModels {
+        for model in allModels where !model.hidden {
             let item = NSMenuItem(title: model.displayName, action: #selector(toggleModel(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = model.id
@@ -248,7 +255,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         var hidden = Preferences.hiddenModelIDs
         if hidden.contains(id) { hidden.remove(id) } else { hidden.insert(id) }
         Preferences.hiddenModelIDs = hidden
-        barView.setModels(allModels.filter { !hidden.contains($0.id) })
+        barView.setModels(allModels.filter { !$0.hidden && !hidden.contains($0.id) })
         layout(for: tracker.snapshot)
     }
 

@@ -34,7 +34,7 @@ final class ReasoningSwitcher {
             guard let window = AX.focusedWindow(pid: pid) else {
                 finish(.failed("No Codex window")); return
             }
-            let located = CodexUI.Cache.current(window: window, models: allModels)
+            let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
             guard let composer = located.composer, let button = located.modelButton else {
                 finish(.failed("No task composer")); return
             }
@@ -48,6 +48,10 @@ final class ReasoningSwitcher {
             if from == to { finish(.changed); return }
             // Codex's command handler belongs to the composer. This also identifies
             // the right composer when a split view has two tasks open.
+            if let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
+               AX.role(focused) == kAXTextAreaRole as String, !CFEqual(focused, composer) {
+                finish(.failed("The task composer lost focus")); return
+            }
             AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             guard ModelSwitcher.waitUntil(timeout: 0.6, {
                 let app = AXUIElementCreateApplication(pid)
@@ -68,12 +72,13 @@ final class ReasoningSwitcher {
                 }
                 let expected = model.supportedEfforts[next]
                 let confirmed = ModelSwitcher.waitUntil(timeout: 1.2) {
-                    var title = AX.title(button)
-                    if CurrentModelMatcher.selection(forButtonTitle: title, among: allModels).effort != expected {
-                        title = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
-                            .modelButton.map(AX.title) ?? ""
-                    }
-                    let state = CurrentModelMatcher.selection(forButtonTitle: title, among: allModels)
+                    guard codex.isActive,
+                          let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
+                          CFEqual(focused, composer) else { return false }
+                    let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+                    guard let currentComposer = located.composer, CFEqual(currentComposer, composer),
+                          let button = located.modelButton else { return false }
+                    let state = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
                     return state.modelID == model.id && state.effort == expected
                 }
                 guard confirmed else {

@@ -45,13 +45,15 @@ final class BarView: NSVisualEffectView {
     var onSelectEffort: ((String) -> Void)?
     /// Called when the status text is clicked (used for "Allow Accessibility access").
     var onStatusClick: (() -> Void)?
-    /// Repositions the panel when a status message changes its required width.
+    /// Repositions the panel when the visible model list changes its required width.
     var onSizeChange: (() -> Void)?
     /// Supplies the right-click menu.
     var menuProvider: (() -> NSMenu)?
 
-    private let stack = NSStackView()
-    private let contentStack = NSStackView()
+    private let modelSpacing: CGFloat = 4
+    private let sectionSpacing: CGFloat = 8
+    private let sliderWidth: CGFloat = 122
+    private var reasoningLabelWidth: CGFloat = 0
     private let reasoningLabel = NSTextField(labelWithString: "Reasoning —")
     private let reasoningSlider = ReasoningSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let separator = NSBox()
@@ -62,6 +64,8 @@ final class BarView: NSVisualEffectView {
     private var currentModelID: String?
     private var currentEffort: String?
     private var previewEffort: String?
+    private var dragModelID: String?
+    private var dragWasInvalidated = false
     private var busyReasoning = false
     private var busyModelID: String?
     private var statusHideWork: DispatchWorkItem?
@@ -77,31 +81,17 @@ final class BarView: NSVisualEffectView {
         layer?.cornerRadius = 9
         layer?.masksToBounds = true
 
-        contentStack.orientation = .horizontal
-        contentStack.spacing = 8
-        contentStack.alignment = .centerY
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(contentStack)
-
-        stack.orientation = .horizontal
-        stack.spacing = 4
-        stack.alignment = .centerY
-        contentStack.addArrangedSubview(stack)
-
         separator.boxType = .separator
-        NSLayoutConstraint.activate([separator.widthAnchor.constraint(equalToConstant: 1),
-                                     separator.heightAnchor.constraint(equalToConstant: 17)])
-        contentStack.addArrangedSubview(separator)
+        addSubview(separator)
 
         reasoningLabel.font = .systemFont(ofSize: 11, weight: .medium)
         reasoningLabel.textColor = .secondaryLabelColor
         let longestReasoningLabel = "Reasoning Extra High" as NSString
-        let reasoningLabelWidth = ceil(longestReasoningLabel.size(withAttributes: [
+        reasoningLabelWidth = ceil(longestReasoningLabel.size(withAttributes: [
             .font: reasoningLabel.font as Any,
         ]).width) + 4
-        reasoningLabel.widthAnchor.constraint(equalToConstant: reasoningLabelWidth).isActive = true
-        reasoningLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        contentStack.addArrangedSubview(reasoningLabel)
+        reasoningLabel.lineBreakMode = .byTruncatingTail
+        addSubview(reasoningLabel)
 
         reasoningSlider.numberOfTickMarks = 2
         reasoningSlider.allowsTickMarkValuesOnly = true
@@ -109,11 +99,24 @@ final class BarView: NSVisualEffectView {
         reasoningSlider.isContinuous = true
         reasoningSlider.target = self
         reasoningSlider.action = #selector(effortClicked(_:))
-        reasoningSlider.onFinishTracking = { [weak self] in self?.commitEffort() }
+        reasoningSlider.onBeginTracking = { [weak self] in
+            guard let self else { return }
+            self.dragModelID = self.currentModelID
+            self.dragWasInvalidated = false
+        }
+        reasoningSlider.onFinishTracking = { [weak self] in
+            guard let self else { return }
+            if self.dragWasInvalidated {
+                self.previewEffort = nil
+                self.refreshReasoningControl()
+            } else {
+                self.commitEffort()
+            }
+            self.dragModelID = nil
+        }
         reasoningSlider.toolTip = "Choose reasoning effort"
         reasoningSlider.setAccessibilityLabel("Reasoning effort")
-        reasoningSlider.widthAnchor.constraint(equalToConstant: 122).isActive = true
-        contentStack.addArrangedSubview(reasoningSlider)
+        addSubview(reasoningSlider)
         refreshReasoningControl()
 
         statusButton.isBordered = false
@@ -121,20 +124,8 @@ final class BarView: NSVisualEffectView {
         statusButton.target = self
         statusButton.action = #selector(statusClicked)
         statusButton.isHidden = true
-        statusButton.translatesAutoresizingMaskIntoConstraints = false
-        statusButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        (statusButton.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
         addSubview(statusButton)
-
-        NSLayoutConstraint.activate([
-            // Buttons centred in the strip; they may shrink (truncating titles) but never
-            // overlap the status text on the right.
-            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            contentStack.centerXAnchor.constraint(equalTo: centerXAnchor).withPriority(.defaultLow),
-            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
-            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: statusButton.leadingAnchor, constant: -8),
-            statusButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-        ])
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -149,9 +140,48 @@ final class BarView: NSVisualEffectView {
         }
     }
 
-    /// Natural width of the visible buttons, with room for a temporary status.
+    /// Independent of the current layout: compressed controls never feed a smaller
+    /// width back into the panel, and status messages use the reasoning area.
     var preferredWidth: CGFloat {
-        contentStack.fittingSize.width + 24 + (statusButton.isHidden ? 0 : statusButton.fittingSize.width + 12)
+        modelWidths.reduce(0, +) + CGFloat(max(models.count - 1, 0)) * modelSpacing
+            + sectionSpacing + naturalReasoningWidth + 16
+    }
+
+    private var modelWidths: [CGFloat] {
+        models.map { buttons[$0.id]?.intrinsicContentSize.width ?? 0 }
+    }
+
+    private var naturalReasoningWidth: CGFloat {
+        1 + sectionSpacing + reasoningLabelWidth + sectionSpacing + sliderWidth
+    }
+
+    override func layout() {
+        super.layout()
+        let available = max(0, bounds.width - 16)
+        let reasoningWidth = min(naturalReasoningWidth, max(150, available * 0.45))
+        let gaps = CGFloat(max(models.count - 1, 0)) * modelSpacing
+        let buttonSpace = max(0, available - reasoningWidth - sectionSpacing - gaps)
+        let naturalButtons = modelWidths.reduce(0, +)
+        let scale = min(1, buttonSpace / max(naturalButtons, 1))
+        var x: CGFloat = 8
+        for model in models {
+            guard let button = buttons[model.id] else { continue }
+            let width = button.intrinsicContentSize.width * scale
+            button.frame = NSRect(x: x, y: (bounds.height - 22) / 2, width: width, height: 22)
+            x += width + modelSpacing
+        }
+        if !models.isEmpty { x -= modelSpacing }
+        x += sectionSpacing
+        separator.frame = NSRect(x: x, y: (bounds.height - 17) / 2, width: 1, height: 17)
+        x += 1 + sectionSpacing
+        let remaining = max(0, bounds.width - 8 - x)
+        let labelWidth = min(reasoningLabelWidth, max(60, remaining - sectionSpacing - 70))
+        reasoningLabel.frame = NSRect(x: x, y: (bounds.height - 16) / 2, width: labelWidth, height: 16)
+        reasoningSlider.frame = NSRect(x: x + labelWidth + sectionSpacing, y: 2,
+                                      width: max(0, remaining - labelWidth - sectionSpacing), height: bounds.height - 4)
+        statusButton.frame = NSRect(x: x, y: 3, width: remaining, height: bounds.height - 6)
+        reasoningLabel.isHidden = !statusButton.isHidden
+        reasoningSlider.isHidden = !statusButton.isHidden
     }
 
     // MARK: - Content
@@ -164,17 +194,19 @@ final class BarView: NSVisualEffectView {
     func setModels(_ newModels: [CodexModel]) {
         guard newModels != models else { return }
         models = newModels
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        buttons.values.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
         for model in newModels {
             let button = ModelButton(model: model)
             button.target = self
             button.action = #selector(modelClicked(_:))
-            stack.addArrangedSubview(button)
+            addSubview(button)
             buttons[model.id] = button
         }
         refreshButtonStates()
         refreshReasoningControl()
+        needsLayout = true
+        onSizeChange?()
     }
 
     /// Highlights the model Codex reports for the open chat (nil = unknown).
@@ -184,7 +216,12 @@ final class BarView: NSVisualEffectView {
 
     func setCurrentSelection(_ selection: CurrentSelection) {
         guard selection.modelID != currentModelID || selection.effort != currentEffort else { return }
-        if selection.modelID != currentModelID { previewEffort = nil }
+        if selection.modelID != currentModelID {
+            previewEffort = nil
+            if reasoningSlider.isTrackingPointer { dragWasInvalidated = true }
+        } else if !reasoningSlider.isTrackingPointer && !busyReasoning {
+            previewEffort = nil
+        }
         currentModelID = selection.modelID
         currentEffort = selection.effort
         refreshButtonStates()
@@ -205,6 +242,12 @@ final class BarView: NSVisualEffectView {
         refreshReasoningControl()
     }
 
+    func cancelReasoningPreview() {
+        previewEffort = nil
+        if reasoningSlider.isTrackingPointer { dragWasInvalidated = true }
+        refreshReasoningControl()
+    }
+
     private func refreshButtonStates() {
         for (id, button) in buttons {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
@@ -216,15 +259,16 @@ final class BarView: NSVisualEffectView {
         let model = catalogModels.first { $0.id == currentModelID }
         let efforts = model?.supportedEfforts ?? []
         let index = currentEffort.flatMap { efforts.firstIndex(of: $0) }
-        reasoningSlider.numberOfTickMarks = max(efforts.count, 2)
-        reasoningSlider.minValue = 0
-        reasoningSlider.maxValue = Double(max(efforts.count - 1, 1))
+        if !reasoningSlider.isTrackingPointer {
+            reasoningSlider.numberOfTickMarks = max(efforts.count, 2)
+            reasoningSlider.minValue = 0
+            reasoningSlider.maxValue = Double(max(efforts.count - 1, 1))
+        }
         if !reasoningSlider.isTrackingPointer && !busyReasoning {
             reasoningSlider.doubleValue = Double(index ?? 0)
         }
         reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning
         updateReasoningLabel()
-        onSizeChange?()
     }
 
     private func updateReasoningLabel() {
@@ -241,7 +285,8 @@ final class BarView: NSVisualEffectView {
         guard let text, !text.isEmpty else {
             statusButton.isHidden = true
             statusButton.attributedTitle = NSAttributedString(string: "")
-            onSizeChange?()
+            statusButton.toolTip = nil
+            needsLayout = true
             return
         }
         statusButton.attributedTitle = NSAttributedString(string: text, attributes: [
@@ -249,7 +294,8 @@ final class BarView: NSVisualEffectView {
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
         ])
         statusButton.isHidden = false
-        onSizeChange?()
+        statusButton.toolTip = text
+        needsLayout = true
         if !sticky {
             let work = DispatchWorkItem { [weak self] in self?.showStatus(nil) }
             statusHideWork = work
@@ -264,7 +310,9 @@ final class BarView: NSVisualEffectView {
     }
 
     @objc private func effortClicked(_ sender: ReasoningSlider) {
-        guard let model = catalogModels.first(where: { $0.id == currentModelID }) else { return }
+        guard !dragWasInvalidated || !sender.isTrackingPointer,
+              !sender.isTrackingPointer || dragModelID == currentModelID,
+              let model = catalogModels.first(where: { $0.id == currentModelID }) else { return }
         let index = sender.integerValue
         guard model.supportedEfforts.indices.contains(index) else { return }
         previewEffort = model.supportedEfforts[index]
@@ -300,13 +348,41 @@ final class BarView: NSVisualEffectView {
 /// Sends previews continuously, then commits one selected tick at mouse release.
 private final class ReasoningSlider: NSSlider {
     private(set) var isTrackingPointer = false
+    var onBeginTracking: (() -> Void)?
     var onFinishTracking: (() -> Void)?
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         isTrackingPointer = true
-        super.mouseDown(with: event)
+        onBeginTracking?()
+        track(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isTrackingPointer else { return }
+        track(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isTrackingPointer else { return }
+        track(event)
         isTrackingPointer = false
         onFinishTracking?()
+    }
+
+    private func track(_ event: NSEvent) {
+        guard numberOfTickMarks > 1 else { return }
+        // Explicit pointer events keep the label and commit boundary in sync.
+        // AppKit's native mouseDown tracking can return before a knob drag ends.
+        let point = convert(event.locationInWindow, from: nil)
+        let first = rectOfTickMark(at: 0).midX
+        let last = rectOfTickMark(at: numberOfTickMarks - 1).midX
+        let fraction = max(0, min(1, (point.x - first) / max(last - first, 1)))
+        let index = Int((fraction * Double(numberOfTickMarks - 1)).rounded())
+        doubleValue = tickMarkValue(at: index)
+        if let action { sendAction(action, to: target) }
     }
 }
 
@@ -336,7 +412,6 @@ final class ModelButton: NSButton {
         setAccessibilityLabel(model.displayName)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         (cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-        NSLayoutConstraint.activate([heightAnchor.constraint(equalToConstant: 22)])
         updateAppearance()
     }
 
@@ -379,12 +454,5 @@ final class ModelButton: NSButton {
             .foregroundColor: textColor,
             .font: NSFont.systemFont(ofSize: 12, weight: weight),
         ])
-    }
-}
-
-private extension NSLayoutConstraint {
-    func withPriority(_ priority: NSLayoutConstraint.Priority) -> NSLayoutConstraint {
-        self.priority = priority
-        return self
     }
 }

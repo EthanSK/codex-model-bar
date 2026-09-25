@@ -28,52 +28,24 @@ enum CodexUI {
         var composer: AXUIElement?
     }
 
-    /// Finds the composer the user is working in: its model button and message box.
-    ///
-    /// Codex can show two chats at once (e.g. a side chat next to the main one), each
-    /// with its own composer. The one whose message box has keyboard focus wins; with no
-    /// focused message box, the first composer in the window is used.
-    static func locate(in window: AXUIElement, models: [CodexModel]) -> Located {
-        let all = locateAll(in: window, models: models)
-        return all.first { $0.composer.map(AX.isFocused) == true } ?? all.first ?? Located()
-    }
-
-    /// Every composer in the window (model button + its message box), in document order.
-    ///
-    /// The message box is searched for near its button (the side panel can contain
-    /// other text areas, e.g. a code viewer), with the first text area in the window as
-    /// a fallback when no button is paired with one.
-    static func locateAll(in window: AXUIElement, models: [CodexModel]) -> [Located] {
-        var found: [Located] = []
-        var firstTextArea: AXUIElement?
-        var visited = 0
-        var stack: [AXUIElement] = [window]
-        while let element = stack.popLast(), visited < 30_000 {
-            visited += 1
-            let role = AX.role(element)
-            if role == kAXPopUpButtonRole as String,
-               CurrentModelMatcher.isModelButtonTitle(AX.title(element), among: models) {
-                found.append(Located(modelButton: element, composer: messageBox(near: element)))
-            } else if firstTextArea == nil, role == kAXTextAreaRole as String {
-                firstTextArea = element
-            }
-            stack.append(contentsOf: AX.children(element).reversed())
+    /// Resolve the focused input first, then a still-attached previous input.
+    /// Multiple composers without either identity are deliberately ambiguous.
+    static func locate(in window: AXUIElement, models: [CodexModel], previousComposer: AXUIElement?) -> Located {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else { return Located() }
+        let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        let resolver = ComposerLocator<AXUIElement>(
+            children: AX.children, parent: AX.parent,
+            isTextArea: { AX.role($0) == kAXTextAreaRole as String },
+            isModelButton: {
+                AX.role($0) == kAXPopUpButtonRole as String
+                    && CurrentModelMatcher.isModelButtonTitle(AX.title($0), among: models)
+            }, equals: { CFEqual($0, $1) }
+        )
+        guard let result = resolver.locate(in: window, focused: focused, previousComposer: previousComposer) else {
+            return Located()
         }
-        if found.count == 1, found[0].composer == nil { found[0].composer = firstTextArea }
-        return found
-    }
-
-    /// The text area sharing the nearest ancestor with the model button.
-    private static func messageBox(near button: AXUIElement) -> AXUIElement? {
-        var ancestor = button
-        for _ in 0..<6 {
-            guard let parent = AX.parent(ancestor) else { return nil }
-            ancestor = parent
-            if let area = AX.first(in: ancestor, limit: 400, where: { AX.role($0) == kAXTextAreaRole as String }) {
-                return area
-            }
-        }
-        return nil
+        return Located(modelButton: result.modelButton, composer: result.composer)
     }
 
     /// The message box's real text (its placeholder counts as empty).
@@ -122,14 +94,6 @@ enum CodexUI {
         return nil
     }
 
-    /// True when a `/model` menu is open anywhere in the window (bounded walk; used only
-    /// on a failure path).
-    static func anyModelMenuIsOpen(in window: AXUIElement) -> Bool {
-        AX.first(in: window, limit: 30_000) {
-            AX.role($0) == kAXStaticTextRole as String && AX.string($0, kAXValueAttribute) == recentHeader
-        } != nil
-    }
-
     /// The buttons of the section a header text belongs to: the closest ancestor (up
     /// to three levels) that has button children.
     private static func sectionButtons(forHeader header: AXUIElement) -> [AXUIElement] {
@@ -151,24 +115,28 @@ enum CodexUI {
     }
 
     /// Shared cache of the located elements, touched only on `AX.queue`.
-    /// The watcher refreshes it; the switcher reuses it to skip a 0.5 s walk.
+    /// Polls reuse a recent attached control; explicit switches always re-locate.
     enum Cache {
         static var located = Located()
         static var windowForLocated: AXUIElement?
         /// The text area that had keyboard focus at the last walk (see `focusMoved`).
         private static var focusedAtLastWalk: AXUIElement?
+        private static var lastLocatedAt = Date.distantPast
 
         /// Returns cached elements when they still look right, otherwise re-locates.
         static func current(window: AXUIElement, models: [CodexModel], forceRefresh: Bool = false) -> Located {
             if !forceRefresh, let cachedWindow = windowForLocated, CFEqual(cachedWindow, window),
                let button = located.modelButton,
+               Date().timeIntervalSince(lastLocatedAt) < 1.0,
                CurrentModelMatcher.isModelButtonTitle(AX.title(button), among: models),
+               AX.isDescendant(button, of: window),
                !focusMoved(window: window) {
                 return located
             }
-            located = locate(in: window, models: models)
+            located = locate(in: window, models: models, previousComposer: located.composer)
             windowForLocated = window
             focusedAtLastWalk = focusedTextArea(window: window)
+            lastLocatedAt = Date()
             return located
         }
 
@@ -196,6 +164,7 @@ enum CodexUI {
             located = Located()
             windowForLocated = nil
             focusedAtLastWalk = nil
+            lastLocatedAt = .distantPast
         }
     }
 }

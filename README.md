@@ -25,6 +25,8 @@ The script uses an available Apple Development identity for a stable signature. 
 
 Click a model in the strip to change the **open Codex task**. The slider beside the models changes its reasoning level; each tick is one level supported by the current model. Its label previews the selected level while you drag, and the bar applies that level when you release. The strip keeps the same width as model selection and reasoning levels change. Right-click the strip to show or hide model buttons, refresh the list, turn **Open at login** on or off, or quit. Open at login is enabled on the first installed launch; you can disable it from the same menu. Hidden buttons are your local choice and do not remove models from Codex itself.
 
+With a main task and side task open, the bar follows the input you have focused. It also follows changes made with Codex's own picker. If it cannot identify the active composer, it stops instead of choosing the first input in the window. Moving to another input during a reasoning drag cancels that drag. Status messages temporarily use the reasoning area, keeping every model button in place and preserving the strip's width.
+
 The reasoning slider uses Codex's **Increase reasoning effort** and **Decrease reasoning effort** commands. Assign both shortcuts in Codex's keyboard shortcut settings; the bar reads `~/.codex/keybindings.json` and only sends a shortcut that is actually configured. For example, assign `Ctrl+Command+Up` to increase and `Ctrl+Command+Down` to decrease. The bar confirms each step from Codex's composer before proceeding. If the shortcuts are missing or the composer does not report an effort, the slider cannot change it.
 
 The buttons follow the model list cached by the running Codex app. If you use [Claude in Codex](https://github.com/EthanSK/claude-in-codex), its Claude entries appear too. The bar notices when Codex refreshes that list after login. It keeps a local backup for startup and can ask Codex's bundled `app-server` when the app cache is unavailable. You can refresh manually from the right-click menu.
@@ -40,7 +42,7 @@ To switch, the bar opens Codex's own `/model` menu with Control+Shift+M. It choo
 
 ## Develop
 
-`swift test` runs model parsing, title matching, draft-text, placement and AppKit bar-width tests. `Sources/CodexModelBarCore` contains the pure logic. `Sources/CodexModelBar` contains the AppKit panel, Codex window tracking, model-menu interaction and reasoning shortcut control. `scripts/make-icon.swift` is the editable icon source. `LEARNINGS.md` records observed compatibility and testing lessons.
+`swift test` runs model parsing, title matching, draft-text, placement, composer-focus and stale-read tests, plus AppKit layout and slider-drag tests. `Sources/CodexModelBarCore` contains the pure logic. `Sources/CodexModelBar` contains the AppKit panel, Codex window tracking, model-menu interaction and reasoning shortcut control. `scripts/make-icon.swift` is the editable icon source. `LEARNINGS.md` records observed compatibility and testing lessons.
 
 Contributions and issue reports are welcome. Please include the Codex desktop version and macOS version when reporting a model-switching problem, and remove personal task content from screenshots or logs.
 

@@ -38,8 +38,8 @@ import CodexModelBarCore
 ///    letter, and only when the message box differs from before by exactly that search.
 final class ModelSwitcher {
     enum Result: CustomStringConvertible {
-        case switched
-        case alreadyCurrent
+        case switched(CurrentSelection)
+        case alreadyCurrent(CurrentSelection)
         /// Stopped before sending another key because the user was typing.
         case cancelledForTyping
         /// `searchLeft` is the search text that could not be removed safely (nil when
@@ -93,15 +93,16 @@ final class ModelSwitcher {
     private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t) -> Result {
         // Step 1: current model and message box.
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
-        var located = CodexUI.Cache.current(window: window, models: allModels)
+        var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
         if located.modelButton == nil || located.composer == nil {
             located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
         }
         guard let button = located.modelButton, let composer = located.composer else {
             return .failed("model button or message box not found (no chat composer on screen?)")
         }
-        if CurrentModelMatcher.model(forTitle: AX.title(button), among: allModels)?.id == target.id {
-            return .alreadyCurrent
+        let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
+        if current.modelID == target.id {
+            return .alreadyCurrent(current)
         }
 
         // Step 2: open the /model menu, unless the user already has it open.
@@ -114,11 +115,8 @@ final class ModelSwitcher {
             menu = poll(timeout: 1.5) { CodexUI.modelMenu(near: composer) }
         }
         guard let openMenu = menu else {
-            // With two chats on screen the shortcut could, in principle, open the other
-            // chat's menu. Close any /model menu the user did not ask for.
-            if let window = AX.focusedWindow(pid: pid), CodexUI.anyModelMenuIsOpen(in: window) {
-                _ = Keyboard.pressUnlessTyping(Keyboard.escape, pid: pid)
-            }
+            // Only close this composer's menu while it still owns keyboard focus.
+            closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("Codex's /model menu did not open")
         }
 
@@ -138,14 +136,14 @@ final class ModelSwitcher {
                 closeMenuIfOpen(composer: composer, pid: pid)
                 return .cancelledForTyping
             }
-            let confirmed = confirm(target, button: button, window: window, allModels: allModels)
+            let confirmed = confirm(target, composer: composer, window: window, pid: pid, allModels: allModels)
             // If the menu had closed after all, the digit landed in the message box.
             let digit = String(index + 1)
-            if !confirmed, !removeTyped(digit, before: before, composer: composer, pid: pid) {
+            if confirmed == nil, !removeTyped(digit, before: before, composer: composer, pid: pid) {
                 return .failed("Codex did not confirm the new model", searchLeft: digit)
             }
             closeMenuIfOpen(composer: composer, pid: pid)
-            return confirmed ? .switched : .failed("Codex did not confirm the new model")
+            return confirmed.map(Result.switched) ?? .failed("Codex did not confirm the new model")
         }
 
         // Step 4: search the menu. Codex only treats digits as "pick recent entry N" while
@@ -161,6 +159,10 @@ final class ModelSwitcher {
         let before = CodexUI.composerText(composer)
         var typed = ""
         for character in query {
+            guard isFocused(composer, pid: pid) else {
+                return abandonSearch(typed, before: before, composer: composer, pid: pid,
+                                     result: .failed("message box lost focus while searching"))
+            }
             guard Keyboard.typeUnlessTyping(character, pid: pid) else {
                 return abandonSearch(typed, before: before, composer: composer, pid: pid, result: .cancelledForTyping)
             }
@@ -193,7 +195,7 @@ final class ModelSwitcher {
         guard Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid, result: .cancelledForTyping)
         }
-        let confirmed = confirm(target, button: button, window: window, allModels: allModels)
+        let confirmed = confirm(target, composer: composer, window: window, pid: pid, allModels: allModels)
 
         // Selecting an entry removes the search from the message box. Make sure of it.
         if !waitUntil(timeout: 1.0, { CodexUI.composerText(composer) == before }) {
@@ -202,7 +204,7 @@ final class ModelSwitcher {
             if case .failed(_, .some) = cleanup { return cleanup }
         }
         closeMenuIfOpen(composer: composer, pid: pid)
-        return confirmed ? .switched : .failed("Codex did not confirm the new model")
+        return confirmed.map(Result.switched) ?? .failed("Codex did not confirm the new model")
     }
 
     /// The text to type into the /model search: the model id (it matches Codex's entry
@@ -211,17 +213,17 @@ final class ModelSwitcher {
         [model.id, model.displayName].first { $0.first?.isLetter == true }
     }
 
-    /// Waits for the composer's model button to show `target`. Codex can re-create the
-    /// button after a switch, so fall back to re-locating it.
-    private static func confirm(_ target: CodexModel, button: AXUIElement, window: AXUIElement,
-                                allModels: [CodexModel]) -> Bool {
-        waitUntil(timeout: 2.5) {
-            var title = AX.title(button)
-            if CurrentModelMatcher.model(forTitle: title, among: allModels)?.id != target.id {
-                title = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
-                    .modelButton.map(AX.title) ?? ""
-            }
-            return CurrentModelMatcher.model(forTitle: title, among: allModels)?.id == target.id
+    /// Re-find the button in the same focused composer. A retained AX object can
+    /// still report its old title after Codex replaces it.
+    private static func confirm(_ target: CodexModel, composer: AXUIElement, window: AXUIElement, pid: pid_t,
+                                allModels: [CodexModel]) -> CurrentSelection? {
+        poll(timeout: 2.5) {
+            guard isFocused(composer, pid: pid) else { return nil }
+            let located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+            guard let currentComposer = located.composer, CFEqual(currentComposer, composer),
+                  let button = located.modelButton else { return nil }
+            let selection = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
+            return selection.modelID == target.id ? selection : nil
         }
     }
 
@@ -253,6 +255,7 @@ final class ModelSwitcher {
             return false
         }
         for _ in typed {
+            guard isFocused(composer, pid: pid) else { return false }
             guard Keyboard.pressUnlessTyping(Keyboard.backspace, pid: pid) else { return false }
         }
         return waitUntil(timeout: 0.8) { CodexUI.composerText(composer) == before }
@@ -269,7 +272,7 @@ final class ModelSwitcher {
     /// Escape only closes the menu; it never edits the message box.
     private static func closeMenuIfOpen(composer: AXUIElement, pid: pid_t) {
         usleep(120_000)   // let Codex finish closing the menu after a successful pick
-        guard CodexUI.modelMenu(near: composer) != nil else { return }
+        guard isFocused(composer, pid: pid), CodexUI.modelMenu(near: composer) != nil else { return }
         guard Keyboard.pressUnlessTyping(Keyboard.escape, pid: pid) else { return }
         _ = waitUntil(timeout: 0.5) { CodexUI.modelMenu(near: composer) == nil }
     }
@@ -277,11 +280,15 @@ final class ModelSwitcher {
     /// Gives the message box keyboard focus and proves it.
     private static func focus(_ composer: AXUIElement, pid: pid_t) -> Bool {
         if isFocused(composer, pid: pid) { return true }
+        let app = AXUIElementCreateApplication(pid)
+        if let focused: AXUIElement = AX.attribute(app, kAXFocusedUIElementAttribute),
+           AX.role(focused) == kAXTextAreaRole as String { return false }
         AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         return waitUntil(timeout: 0.6) { isFocused(composer, pid: pid) }
     }
 
     private static func isFocused(_ element: AXUIElement, pid: pid_t) -> Bool {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
         let app = AXUIElementCreateApplication(pid)
         guard let current: AXUIElement = AX.attribute(app, kAXFocusedUIElementAttribute) else { return false }
         return CFEqual(current, element)
