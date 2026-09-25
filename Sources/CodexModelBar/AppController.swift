@@ -20,6 +20,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Every model Codex offers (before the user's show/hide choices).
     private var allModels: [CodexModel] = []
     private var refreshTimer: Timer?
+    private var cacheWatchTimer: Timer?
+    private var lastCodexCacheModification: Date?
     private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -36,6 +38,16 @@ final class AppController: NSObject, NSApplicationDelegate {
         // Instant startup from the cached list, then refresh from Codex itself.
         applyModels(catalog.loadCachedModels())
         refreshModels()
+        // The desktop app rewrites this cache after sign-in, account changes, and
+        // bridge recovery. Watch that file so the buttons follow without a restart.
+        lastCodexCacheModification = catalog.codexCacheModificationDate
+        cacheWatchTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let modified = self.catalog.codexCacheModificationDate
+            guard modified != self.lastCodexCacheModification else { return }
+            self.lastCodexCacheModification = modified
+            self.refreshModels()
+        }
         // Codex's catalogue rarely changes; refresh every 30 minutes (and on demand
         // from the right-click menu).
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in

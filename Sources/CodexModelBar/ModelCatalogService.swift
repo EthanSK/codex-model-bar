@@ -3,45 +3,56 @@ import CodexModelBarCore
 
 /// Loads the list of models to show as buttons.
 ///
-/// Source of truth: Codex's own backend. We start the `codex` binary bundled inside
-/// the Codex/ChatGPT app with `app-server` (JSON-RPC over stdin/stdout, one JSON
-/// object per line), ask it for `model/list`, then stop it. That is the same call
-/// Codex's model picker makes, so the buttons match the picker exactly — custom
-/// entries such as the Claude bridge models included.
+/// Source of truth: the model cache written by the running Codex app. A separate
+/// `codex app-server` can return a different catalogue while Codex signs in, so
+/// its `model/list` response is only a fallback when the app cache is unavailable.
 ///
-/// Fallbacks, in order:
-///  1. Our last good list, cached in Application Support (instant startup, offline).
-///  2. Codex's `~/.codex/models_cache.json` (may lag behind the desktop catalogue).
+/// Fallbacks are our last good list for startup, then a short-lived
+/// `codex app-server` request when the app cache is unavailable.
 final class ModelCatalogService {
     /// Where the last successful list is cached between launches.
-    private let cacheURL: URL = {
+    private let cacheURL: URL
+    private let codexCacheURL: URL
+
+    init(cacheURL: URL? = nil, codexCacheURL: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Codex Model Bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("models.json")
-    }()
+        self.cacheURL = cacheURL ?? base.appendingPathComponent("models.json")
+        self.codexCacheURL = codexCacheURL ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/models_cache.json")
+    }
 
-    /// Reads the cached list, or Codex's own cache when we have never fetched one.
+    var codexCacheModificationDate: Date? {
+        (try? FileManager.default.attributesOfItem(atPath: codexCacheURL.path))?[.modificationDate] as? Date
+    }
+
+    private static func readCodexCache(at url: URL) -> [CodexModel] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return CodexModelParsing.parseModelsCache(data)
+    }
+
+    /// Prefer the running app's catalogue over a previous bar snapshot.
     func loadCachedModels() -> [CodexModel] {
+        let codexModels = Self.readCodexCache(at: codexCacheURL)
+        if !codexModels.isEmpty { return codexModels }
         if let data = try? Data(contentsOf: cacheURL),
            let models = try? JSONDecoder().decode([CodexModel].self, from: data),
            !models.isEmpty {
             return models
         }
-        let codexCache = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/models_cache.json")
-        if let data = try? Data(contentsOf: codexCache) {
-            return CodexModelParsing.parseModelsCache(data)
-        }
         return []
     }
 
-    /// Fetches the live list from the Codex backend on a background thread and calls
-    /// `completion` on the main thread. `nil` means the fetch failed (the caller keeps
-    /// showing whatever it already has).
+    /// Refreshes from the app cache, falling back to app-server if it is missing.
+    /// `nil` means both sources failed; the caller keeps its existing buttons.
     func refresh(codexAppURL: URL?, completion: @escaping ([CodexModel]?) -> Void) {
-        DispatchQueue.global(qos: .utility).async { [cacheURL] in
-            let models = Self.fetchFromAppServer(codexAppURL: codexAppURL)
+        DispatchQueue.global(qos: .utility).async { [cacheURL, codexCacheURL] in
+            let current = Self.readCodexCache(at: codexCacheURL)
+            let fetched = current.isEmpty ? Self.fetchFromAppServer(codexAppURL: codexAppURL) : nil
+            // The real app may finish signing in while the fallback request runs.
+            let latest = Self.readCodexCache(at: codexCacheURL)
+            let models = latest.isEmpty ? (current.isEmpty ? fetched : current) : latest
             if let models, !models.isEmpty,
                let data = try? JSONEncoder().encode(models) {
                 // Atomic write so a crash mid-write never leaves a half-written cache.

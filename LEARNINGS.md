@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## Model catalogue after login
+
+On 2026-09-25, the running bar saved a GPT-only `model/list` response while Codex was signed out or reconnecting. It hid Opus and Fable and showed GPT-5.6 models that the Claude bridge normally hides. After login, Codex's own `~/.codex/models_cache.json` listed Opus and Fable again and marked GPT-5.6 hidden; a fresh standalone `app-server` request also returned the Claude models. The bridge was healthy throughout inspection, so its startup was not the demonstrated cause.
+
+Use the model cache written by the running Codex app as the bar's primary catalogue. Watch that file for changes so a sign-in refresh updates the buttons without restarting the bar. Keep the bar's last good list for startup and query a standalone `app-server` only when Codex's cache is unavailable. A regression test starts with an older GPT-only bar snapshot and verifies that the app cache restores Claude and hidden-model visibility.
+
 ## Codex's `/model` menu
 
 In Codex desktop 26.917, Control+Shift+M opens the composer's `/model` menu without changing the draft. Number keys choose the first three recent configurations while the menu's search is empty. To find another model, the bar types the model id into the focused composer, waits until the menu exposes exactly one matching entry, and presses Return. The menu consumes Return and clears its search when selection succeeds. Accessibility `AXPress` and process-targeted clicks did not reliably choose menu entries in this version.
