@@ -52,6 +52,12 @@ Treat an unreadable AX text value as unknown, not an empty draft. Only report le
 
 Direct automation of Codex remains unavailable in this environment; fixtures and passive installed diagnostics are the available verification surfaces. Scope continuity must be recorded on a real replacement before claiming that path passed live.
 
+### 1.2.7: user input after an applied switch is not a failed switch
+
+Between 15:35 and 18:35 UTC on 2026-09-25, the installed 1.2.6 log recorded seven "Codex did not confirm the new model" failures, all stopped with `user-or-window-changed`. In six, the first confirmation read already showed the requested model on the original, unreplaced input in the same context. A hardware click or key press then arrived during the roughly one-second attempt, and the bar reported "Failed to switch" for a change Codex had applied. The seventh had lost its input (`input=none`) and remains a genuine unconfirmed attempt.
+
+A model switch presses no keys after its final choice, so its confirmation may read the original input once after user input and accept that input's own button (focus not required). A replaced input still needs a surviving scope, focus and no user input. Reasoning steps keep the strict rule, because a later step would press another key and a click on another task can leave the same input showing a different chat. After user input the confirmation performs that single read and stops; it never keeps polling. `ModelSwitchResultTests` covers the original, replacement, reasoning and wrong-model cases.
+
 ### Local diagnostics
 
 Keep persistent bounded diagnostics in `~/Library/Logs/Codex Model Bar/diagnostic.log`, with one rotated previous file. Record startup version/build, attempt IDs, phase/result, elapsed time, model/effort, opaque AX identities and focus-resolution decisions. Do not log drafts, conversations, task titles or individual user keystrokes. Tests cover restart persistence, single-line entries, private permissions and bounded rotation. Existing macOS unified logs were enough to distinguish a composer lookup failure from typing cancellation, but did not reveal why the input was rejected.

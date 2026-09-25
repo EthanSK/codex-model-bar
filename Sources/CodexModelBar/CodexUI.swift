@@ -103,17 +103,23 @@ enum CodexUI {
         let selection: CurrentSelection
     }
 
+    /// `readOriginalAfterUserInput` lets a final step (a model switch presses no further keys)
+    /// still read the original input once after a click or key press, instead of reporting a
+    /// switch that already happened as failed. Reasoning steps leave it off: they keep pressing
+    /// keys, and a click on another task can leave the same input showing a different chat.
     static func confirmSelection(modelID: String, effort: String? = nil, original: Located,
                                  window: AXUIElement, pid: pid_t, models: [CodexModel],
                                  since started: TimeInterval, timeout: TimeInterval = 5,
+                                 readOriginalAfterUserInput: Bool = false,
                                  logPrefix: String) -> ConfirmedSelection? {
         guard let identity = original.identity else { return nil }
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var lastState = ""
         repeat {
-            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                  let activeWindow = AX.focusedWindow(pid: pid), CFEqual(activeWindow, window),
-                  !Keyboard.userInteracted(since: started) else {
+            let undisturbed = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+                && AX.focusedWindow(pid: pid).map { CFEqual($0, window) } == true
+                && !Keyboard.userInteracted(since: started)
+            guard undisturbed || readOriginalAfterUserInput else {
                 Log.info("\(logPrefix) phase=confirm-stopped reason=user-or-window-changed")
                 return nil
             }
@@ -128,16 +134,36 @@ enum CodexUI {
                 Log.info("\(logPrefix) phase=confirm \(state)")
                 lastState = state
             }
-            if sameContext, focused, selection.modelID == modelID,
-               effort == nil || selection.effort == effort,
-               !Keyboard.userInteracted(since: started) {
-                Log.info("\(logPrefix) phase=confirmed replaced=\(replaced)")
+            let userInteracted = Keyboard.userInteracted(since: started)
+            if provesSelection(sameContext: sameContext, replaced: replaced, focused: focused,
+                               userInteracted: userInteracted, readOriginalAfterUserInput: readOriginalAfterUserInput,
+                               selection: selection, modelID: modelID, effort: effort) {
+                Log.info("\(logPrefix) phase=confirmed replaced=\(replaced) afterUserInput=\(userInteracted)")
                 return ConfirmedSelection(located: located, selection: selection)
+            }
+            // After a click, key press or window change, that one read is all; never keep polling a context the user left.
+            guard undisturbed else {
+                Log.info("\(logPrefix) phase=confirm-stopped reason=user-or-window-changed")
+                return nil
             }
             usleep(40_000)
         } while ProcessInfo.processInfo.systemUptime < deadline
         Log.info("\(logPrefix) phase=confirm-timeout")
         return nil
+    }
+
+    /// Whether one confirmation read proves the requested model and effort.
+    ///
+    /// The original input's own model button is direct evidence, so with
+    /// `readOriginalAfterUserInput` it proves the switch even after a click or key press
+    /// (the 2026-09-25 log showed six switches Codex had already applied being reported as
+    /// "Failed to switch" this way). A replaced input only matches through a shared scope,
+    /// so it still needs keyboard focus and no user input to prove it is the same task.
+    static func provesSelection(sameContext: Bool, replaced: Bool, focused: Bool, userInteracted: Bool,
+                                readOriginalAfterUserInput: Bool, selection: CurrentSelection,
+                                modelID: String, effort: String?) -> Bool {
+        guard sameContext, selection.modelID == modelID, effort == nil || selection.effort == effort else { return false }
+        return (readOriginalAfterUserInput && !replaced) || (focused && !userInteracted)
     }
 
     // MARK: - The `/model` menu

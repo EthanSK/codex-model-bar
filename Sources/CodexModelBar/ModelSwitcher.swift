@@ -158,7 +158,8 @@ final class ModelSwitcher {
                 return .cancelledForTyping
             }
             let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
-                pid: pid, models: allModels, since: chosenAt, logPrefix: "model-switch attempt=\(attempt)")
+                pid: pid, models: allModels, since: chosenAt, readOriginalAfterUserInput: true,
+                logPrefix: "model-switch attempt=\(attempt)")
             // If the menu had closed after all, the digit landed in the message box.
             let digit = String(index + 1)
             if confirmed == nil {
@@ -226,7 +227,8 @@ final class ModelSwitcher {
                                  since: searchStartedAt, result: .cancelledForTyping)
         }
         let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
-            pid: pid, models: allModels, since: chosenAt, logPrefix: "model-switch attempt=\(attempt)")
+            pid: pid, models: allModels, since: chosenAt, readOriginalAfterUserInput: true,
+            logPrefix: "model-switch attempt=\(attempt)")
 
         // Model confirmation and draft verification are separate observations.
         // A remounted/edited input cannot prove that search text was left behind.
