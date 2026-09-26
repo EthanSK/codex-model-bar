@@ -5,7 +5,8 @@ import CodexModelBarCore
 /// Knowledge of Codex's UI as exposed to Accessibility (verified on desktop 26.917).
 ///
 /// Composer area, simplified. The `/model` menu (opened with Codex's own Control+Command+M
-/// shortcut) is rendered **inline above the message box**, not in a portal:
+/// shortcut) appears above the message box. Desktop 26.924 renders it in a portal;
+/// older versions exposed the following adjacent layout:
 /// ```
 /// AXGroup                                  ← shared parent of menu + composer
 ///  ├ AXGroup                               ← `/model` menu (only while open)
@@ -179,45 +180,22 @@ enum CodexUI {
     static let recentHeader = "Recent models"
     static let matchingHeader = "Matching models"
 
-    /// The open `/model` menu next to `composer`, or nil when it is closed.
-    ///
-    /// Searches outward from the message box (the menu is its sibling), level by level,
-    /// with a node cap per level so a long chat is never walked in full.
+    /// The typing menu may be a portal anywhere in this composer's web area.
+    /// Require focus on this input before using the window-wide menu lookup.
     static func modelMenu(near composer: AXUIElement) -> ModelMenu? {
-        var ancestor = composer
-        for _ in 0..<4 {
-            guard let parent = AX.parent(ancestor) else { return nil }
-            ancestor = parent
-            let headers = AX.all(in: ancestor, limit: 2_500) {
-                AX.role($0) == kAXStaticTextRole as String
-                    && [recentHeader, matchingHeader].contains(AX.string($0, kAXValueAttribute))
-            }
-            guard !headers.isEmpty else { continue }
-            var menu = ModelMenu()
-            for header in headers {
-                let items = sectionButtons(forHeader: header)
-                if AX.string(header, kAXValueAttribute) == recentHeader {
-                    menu.recent = items
-                } else {
-                    menu.matching = items
-                }
-            }
-            return menu
-        }
-        return nil
-    }
-
-    /// The buttons of the section a header text belongs to: the closest ancestor (up
-    /// to three levels) that has button children.
-    private static func sectionButtons(forHeader header: AXUIElement) -> [AXUIElement] {
-        var node = header
-        for _ in 0..<3 {
-            guard let parent = AX.parent(node) else { break }
-            node = parent
-            let buttons = AX.children(node).filter { AX.role($0) == kAXButtonRole as String }
-            if !buttons.isEmpty { return buttons }
-        }
-        return []
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(composer, &pid) == .success,
+              composerHasFocus(composer, pid: pid), let window = AX.focusedWindow(pid: pid) else { return nil }
+        let locator = ModelMenuLocator<AXUIElement>(children: AX.children,
+            isWebArea: { AX.role($0) == "AXWebArea" },
+            isButton: { AX.role($0) == kAXButtonRole as String },
+            header: {
+                guard AX.role($0) == kAXStaticTextRole as String else { return nil }
+                let text = AX.string($0, kAXValueAttribute)
+                return [recentHeader, matchingHeader].contains(text) ? text : nil
+            }, equals: { CFEqual($0, $1) })
+        guard let menu = locator.locate(in: window, composer: composer) else { return nil }
+        return ModelMenu(recent: menu.recent, matching: menu.matching)
     }
 
     /// The menu entry for `target`. Entry titles are Codex's UI-formatted name plus

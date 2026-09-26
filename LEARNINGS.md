@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.13: the typing menu moved to a portal
+
+A read-only capture after the user's 1.2.12 failure found the focused AXTextArea deep in the chat and an open `Recent models` section under a separate portal attached near the outer web area. Its section still contained the expected AXButton entries. The old lookup searched only four AXParent levels from the input, so it could never find this open menu and stopped before typing. More time did not fix the wrong search scope.
+
+Resolve the inline menu from the live window child tree, restricted to the focused composer's nearest web area. Do not use a nested browser's menu, a detached input, or ambiguous separate menu containers. The original adjacent layout and new portal layout use the same section parsing; typing, Enter, delays and draft cleanup remain unchanged. Regression fixtures cover the captured deep input/portal arrangement, the old layout, browser isolation, duplicate menus and plain text without menu buttons. This fixes a captured discovery failure; automated and passive lookup checks still do not prove a full user-triggered switch.
+
 ## 1.2.12: the updated shortcut selects a different interface
 
 The running 26.924.22138 bundle registers two distinct commands: `composer.openModelPicker` defaults to Control+Shift+M and opens the redesigned dropdown, while `composer.openRecentModels` defaults to Control+Command+M on macOS and calls the inline `model` slash-menu handler. The user's keybindings file has no override for either. The previous rollback retained the obsolete shortcut, so it still opened the wrong UI. Source evidence explains the observed menu mismatch; a live successful switch remains a separate check.
