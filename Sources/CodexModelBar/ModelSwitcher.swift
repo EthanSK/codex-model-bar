@@ -128,7 +128,7 @@ final class ModelSwitcher {
             guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
             // Ethan requested the previously working inline route with a short pause,
             // without the unverified dropdown adapter (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
-            usleep(250_000)
+            usleep(150_000)
             guard !Keyboard.userInteracted(since: focusingAt), isFocused(composer, pid: pid) else {
                 return .cancelledForTyping
             }
@@ -146,7 +146,7 @@ final class ModelSwitcher {
         // Allow the opened menu to settle before selecting; the existing live-menu
         // and focus checks below still protect the draft.
         let readyAt = ProcessInfo.processInfo.systemUptime
-        usleep(250_000)
+        usleep(150_000)
         guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }
 
         // Always use the previously working typed search. Ethan rejected picker
@@ -192,7 +192,7 @@ final class ModelSwitcher {
                                  since: searchStartedAt, result: .failed("\(target.displayName) is not in Codex's /model menu"))
         }
         // Let the filtered result settle, then recheck before Return.
-        usleep(250_000)
+        usleep(150_000)
         guard !Keyboard.userInteracted(since: searchStartedAt) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                  since: searchStartedAt, result: .cancelledForTyping)

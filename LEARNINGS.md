@@ -2,6 +2,10 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.15: shorter settling pauses after live confirmation
+
+Ethan confirmed the typing route works. Installed 1.2.14 logs at 17:53 UTC also show successful Astra, Sol and Opus switches, including restored drafts, in about 1.1–1.6 seconds. At his request, shorten the three fixed settling pauses from 250 ms to 150 ms (300 ms less fixed waiting when opening the menu). Keep character pacing, readiness polling, focus checks and final confirmation unchanged. Do not replace the now-confirmed typing route with another picker mechanism. The reduced delay still needs a real desktop switch to establish its live timing.
+
 ## 1.2.14: one model can have several search results
 
 The installed 1.2.13 attempt at 17:05 UTC typed the full Opus ID successfully. Its log then showed only Opus results: a recent configuration and a catalogue hit, each exposed twice by section parsing. The exactly-one-entry check rejected these valid results, removed the query and never pressed Return. This was a selection check failure, not insufficient typing delay.
