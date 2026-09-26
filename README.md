@@ -4,7 +4,7 @@
 
 [Project page](https://ethansk.github.io/codex-model-bar/) · [Source](https://github.com/EthanSK/codex-model-bar) · [Claude in Codex](https://github.com/EthanSK/claude-in-codex)
 
-The bar sits below the window when there is room, moves above it when there is not, and becomes a small overlay when the window fills the screen. It hides when Codex is in the background. The preview on the project page shows the layout; its buttons do not change a real Codex task.
+The bar sits below the window when there is room, moves above it when there is not, and becomes a small overlay when the window fills the screen. It follows Codex's main task window rather than floating computer-use previews, and hides when Codex is in the background. The preview on the project page shows the layout; its buttons do not change a real Codex task.
 
 ## Install from source
 

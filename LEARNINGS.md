@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.8: computer-use previews are not task windows
+
+The user captured the bar underneath a floating computer-use preview on 2026-09-26. The tracker chose the frontmost layer-zero Codex window at least 480 by 360 points, allowing a large preview to displace the actual task window. Size and front-to-back order alone do not establish window ownership for the bar.
+
+Resolve Codex's `AXMainWindow` on the existing AX queue, then match its top-left bounds to an on-screen CoreGraphics window (allowing two points for rounding). Keep the 30 Hz CoreGraphics follow for that window. When Accessibility is granted but the main window cannot be resolved, hide rather than falling back to the preview. Before the first Accessibility grant, preserve the existing window-list selection so the permission action remains reachable. Regression fixtures cover a frontmost preview, switching to a smaller main task window, missing/off-screen main windows, rounding and the initial permission flow. Anchor-change diagnostics record only the window ID and selection source. Installed 1.2.8 diagnostics matched the live main window, the installed executable matched the signed build, and Computer Use visually checked the bar. The preview ordering is covered by regression fixtures; a live floating-preview reproduction was not completed.
+
 ## Model catalogue after login
 
 On 2026-09-25, the running bar saved a GPT-only `model/list` response while Codex was signed out or reconnecting. It hid Opus and Fable and showed GPT-5.6 models that the Claude bridge normally hides. After login, Codex's own `~/.codex/models_cache.json` listed Opus and Fable again and marked GPT-5.6 hidden; a fresh standalone `app-server` request also returned the Claude models. The bridge was healthy throughout inspection, so its startup was not the demonstrated cause.
