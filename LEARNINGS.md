@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.9: the shortcut can open two different model menus
+
+On 2026-09-26, installed diagnostics showed the correct composer being located, followed by repeated “/model menu did not open” failures. Focus then belonged to an AXMenuItem and the modal menu temporarily hid the composer's model control, causing the following click to fail its initial lookup. The running app was `/Applications/ChatGPT.app` (26.924.22138), not the separate older `/Applications/Codex.app`; resolve the running executable before inspecting bundled renderer code. The running bundle contains both the inline Recent models/Matching models path and a dropdown handler for the same model-picker command. It is not evidence that the inline menu was removed.
+
+After the shortcut, detect the focused dropdown as well as the inline menu. The dropdown's Select model item opens a list of model radio items; earlier layouts use a current-model submenu row. Match whole labels (including the UI's omitted GPT- prefix), ignore disabled entries and ambiguous matches, and confirm against the original composer after closing the menu. Keep dropdown actions bounded to its two selection steps and stop when the user interacts. Do not type search text or Return into a dropdown. Regression tests cover both menu layouts, stripped names, disabled and ambiguous matches. All 56 automated tests passed, and the signed installed 1.2.9 executable matches the built artifact. End-to-end desktop switching still requires a user click because Computer Use rejects control of Codex itself.
+
 ## 1.2.8: computer-use previews are not task windows
 
 The user captured the bar underneath a floating computer-use preview on 2026-09-26. The tracker chose the frontmost layer-zero Codex window at least 480 by 360 points, allowing a large preview to displace the actual task window. Size and front-to-back order alone do not establish window ownership for the bar.

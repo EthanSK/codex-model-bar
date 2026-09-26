@@ -2,12 +2,16 @@ import AppKit
 import ApplicationServices
 import CodexModelBarCore
 
-/// Switches the open Codex chat to a chosen model through Codex's **`/model` menu**,
+/// Switches the open Codex chat to a chosen model through Codex's model picker,
 /// opened with Codex's own keyboard shortcut (Control+Shift+M, the
 /// `composer.openModelPicker` command), so Codex applies the change through its
 /// normal code path.
 ///
-/// Why this route (observed against Codex desktop 26.917 and its bundled source):
+/// Current desktop builds can also open a dropdown with a model list. Read its focused
+/// AXMenu and press the exact model item, then close it and confirm the same chat.
+/// Both routes exist in the desktop; detect the menu that actually opened.
+///
+/// Why the inline route existed (observed against earlier desktop builds):
 ///  - No deep link, setting or public API switches the model of the *open* chat.
 ///  - The composer's model dropdown was redesigned (effort slider + model list view) and
 ///    driving it needed fragile focus-and-Space tricks that broke with the redesign.
@@ -127,10 +131,25 @@ final class ModelSwitcher {
         if menu == nil {
             Log.info("model-switch phase=open-menu shortcut=control-shift-m")
             guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
+            let openedAt = ProcessInfo.processInfo.systemUptime
             guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskShift], pid: pid) else {
                 return .cancelledForTyping
             }
-            menu = poll(timeout: 1.5) { CodexUI.modelMenu(near: composer) }
+            _ = waitUntil(timeout: 1.5) {
+                menu = CodexUI.modelMenu(near: composer)
+                return menu != nil || DropdownModelPicker.focusedMenu(window: window, pid: pid) != nil
+            }
+            if menu == nil, DropdownModelPicker.focusedMenu(window: window, pid: pid) != nil {
+                Log.info("model-switch attempt=\(attempt) phase=menu-open kind=dropdown")
+                let selected = DropdownModelPicker.select(target: target, current: current.modelID,
+                    models: allModels, window: window, pid: pid, since: openedAt, attempt: attempt)
+                DropdownModelPicker.close(window: window, pid: pid, since: openedAt)
+                guard selected else { return .failed("Codex did not confirm the new model") }
+                let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
+                    pid: pid, models: allModels, since: openedAt, readOriginalAfterUserInput: true,
+                    logPrefix: "model-switch attempt=\(attempt)")
+                return confirmed.map { .switched($0.selection) } ?? .failed("Codex did not confirm the new model")
+            }
         }
         guard let openMenu = menu else {
             // Only close this composer's menu while it still owns keyboard focus.
