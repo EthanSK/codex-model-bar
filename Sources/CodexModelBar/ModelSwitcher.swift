@@ -20,7 +20,7 @@ import CodexModelBarCore
 ///  1. Find the composer the user is working in (model button + message box).
 ///  2. Focus the message box, verify, send Control+Command+M, wait for the menu.
 ///  3. Type the model's id as the menu's search (the menu reads its search
-///     from the message box). Once the menu shows exactly one entry, the target, press
+///     from the message box). Once every visible result is the target model, press
 ///     Return. Choosing removes the search text again; Codex keeps the current effort
 ///     when the new model supports it.
 ///  4. Confirm the model button now names the target.
@@ -176,13 +176,12 @@ final class ModelSwitcher {
             typed.append(character)
             usleep(8_000)
         }
-        // Wait until the search leaves exactly one entry, the target. Codex highlights the
-        // first entry, so Return then picks it; any other result means we stop.
+        // Recent configurations and catalogue hits can repeat the target. Return picks
+        // the highlighted result, so every visible result must name that same model.
         let onlyTarget = poll(timeout: 1.5) { () -> Bool? in
             guard let menu = CodexUI.modelMenu(near: composer) else { return nil }
             let entries = menu.recent + menu.matching
-            guard entries.count == 1,
-                  CurrentModelMatcher.model(forTitle: AX.title(entries[0]), among: allModels)?.id == target.id
+            guard CurrentModelMatcher.searchResultsOnlyMatch(target.id, titles: entries.map(AX.title), among: allModels)
             else { return nil }
             return true
         }
@@ -200,7 +199,9 @@ final class ModelSwitcher {
         }
         // Return is safe only while the menu is open: Codex's menu handles it first. Check
         // the menu and focus immediately before sending it.
-        guard CodexUI.modelMenu(near: composer) != nil, isFocused(composer, pid: pid) else {
+        guard let finalMenu = CodexUI.modelMenu(near: composer), isFocused(composer, pid: pid),
+              CurrentModelMatcher.searchResultsOnlyMatch(target.id,
+                  titles: (finalMenu.recent + finalMenu.matching).map(AX.title), among: allModels) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                  since: searchStartedAt, result: .failed("Codex's /model menu closed before choosing"))
         }

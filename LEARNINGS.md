@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.14: one model can have several search results
+
+The installed 1.2.13 attempt at 17:05 UTC typed the full Opus ID successfully. Its log then showed only Opus results: a recent configuration and a catalogue hit, each exposed twice by section parsing. The exactly-one-entry check rejected these valid results, removed the query and never pressed Return. This was a selection check failure, not insufficient typing delay.
+
+Allow Return when the nonempty set of visible results all resolve to the requested model, and repeat that check after the existing 250 ms settling delay. Unknown titles or another model still prevent selection. Regression tests replay the exact four observed titles and reject mixed, empty and unknown results. This preserves the requested typing mechanism. Automated checks do not establish that the installed desktop accepted Enter; that still needs a user-triggered switch.
+
 ## 1.2.13: the typing menu moved to a portal
 
 A read-only capture after the user's 1.2.12 failure found the focused AXTextArea deep in the chat and an open `Recent models` section under a separate portal attached near the outer web area. Its section still contained the expected AXButton entries. The old lookup searched only four AXParent levels from the input, so it could never find this open menu and stopped before typing. More time did not fix the wrong search scope.

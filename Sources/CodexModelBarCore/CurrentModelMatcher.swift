@@ -25,6 +25,12 @@ public struct CurrentSelection: Equatable, Sendable {
 ///     description), so we require a word boundary after the name and pick the
 ///     **longest** matching name (so `GPT-6` can never shadow `GPT-6-Sol`).
 public enum CurrentModelMatcher {
+    /// Whether Return can choose any visible result without selecting another model.
+    public static func searchResultsOnlyMatch(_ modelID: String, titles: [String], among models: [CodexModel]) -> Bool {
+        // Codex can list the same model as both a recent configuration and a catalogue hit.
+        !titles.isEmpty && titles.allSatisfy { model(forTitle: $0, among: models)?.id == modelID }
+    }
+
     private static let effortLabels: [(slug: String, label: String)] = [
         ("xhigh", "extra high"), ("ultra", "ultra"), ("medium", "medium"),
         ("high", "high"), ("low", "low"), ("max", "max"),

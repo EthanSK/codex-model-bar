@@ -15,6 +15,20 @@ private let catalogue: [CodexModel] = [
 ]
 
 final class CurrentModelMatcherTests: XCTestCase {
+    func testFilteredOpusRecentAndCatalogueResultsAllowReturn() {
+        // Exact installed 1.2.13 failure: both sections exposed the same two choices.
+        let titles = ["Opus 5.5 Extra High Standard",
+                      "Opus 5.5 Claude Opus 5.5, running through your Claude Code CLI."]
+        XCTAssertTrue(CurrentModelMatcher.searchResultsOnlyMatch("claude-opus-5-5", titles: titles + titles, among: catalogue))
+        XCTAssertTrue(CurrentModelMatcher.searchResultsOnlyMatch("claude-opus-5-5", titles: [titles[1]], among: catalogue))
+    }
+
+    func testUnfilteredOrUnknownResultsNeverAllowReturn() {
+        for titles in [[], ["Opus 5.5 High", "GPT-6 Sol High"], ["Opus 5.5 High", "Unknown model"], ["Fable 5.1"]] {
+            XCTAssertFalse(CurrentModelMatcher.searchResultsOnlyMatch("claude-opus-5-5", titles: titles, among: catalogue))
+        }
+    }
+
     private func id(_ title: String) -> String? {
         CurrentModelMatcher.model(forTitle: title, among: catalogue)?.id
     }
