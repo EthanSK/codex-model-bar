@@ -2,16 +2,12 @@ import AppKit
 import ApplicationServices
 import CodexModelBarCore
 
-/// Switches the open Codex chat to a chosen model through Codex's model picker,
+/// Switches the open Codex chat to a chosen model through Codex's **`/model` menu**,
 /// opened with Codex's own keyboard shortcut (Control+Shift+M, the
 /// `composer.openModelPicker` command), so Codex applies the change through its
 /// normal code path.
 ///
-/// Current desktop builds can also open a dropdown with a model list. Read its focused
-/// AXMenu and press the exact model item, then close it and confirm the same chat.
-/// Both routes exist in the desktop; detect the menu that actually opened.
-///
-/// Why the inline route existed (observed against earlier desktop builds):
+/// Why this route (observed against Codex desktop 26.917 and its bundled source):
 ///  - No deep link, setting or public API switches the model of the *open* chat.
 ///  - The composer's model dropdown was redesigned (effort slider + model list view) and
 ///    driving it needed fragile focus-and-Space tricks that broke with the redesign.
@@ -130,42 +126,27 @@ final class ModelSwitcher {
         var menu = CodexUI.modelMenu(near: composer)
         if menu == nil {
             Log.info("model-switch phase=open-menu shortcut=control-shift-m")
-            let openedAt = ProcessInfo.processInfo.systemUptime
+            let focusingAt = ProcessInfo.processInfo.systemUptime
             guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
-            // AX focus can arrive before Codex processes the focus event. Give its
-            // shortcut handler a moment, then check the same input again.
+            // Ethan requested the previously working inline route with a short pause,
+            // without the unverified dropdown adapter (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
             usleep(250_000)
-            guard !Keyboard.userInteracted(since: openedAt), isFocused(composer, pid: pid) else {
+            guard !Keyboard.userInteracted(since: focusingAt), isFocused(composer, pid: pid) else {
                 return .cancelledForTyping
             }
             guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskShift], pid: pid) else {
                 return .cancelledForTyping
             }
-            _ = waitUntil(timeout: 3.0) {
-                menu = CodexUI.modelMenu(near: composer)
-                return menu != nil || DropdownModelPicker.focusedMenu(window: window, pid: pid) != nil
-            }
-            if menu == nil, DropdownModelPicker.focusedMenu(window: window, pid: pid) != nil {
-                Log.info("model-switch attempt=\(attempt) phase=menu-open kind=dropdown")
-                let selected = DropdownModelPicker.select(target: target, current: current.modelID,
-                    models: allModels, window: window, pid: pid, since: openedAt, attempt: attempt)
-                DropdownModelPicker.close(window: window, pid: pid, since: openedAt)
-                guard selected else { return .failed("Codex did not confirm the new model") }
-                let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
-                    pid: pid, models: allModels, since: openedAt, readOriginalAfterUserInput: true,
-                    logPrefix: "model-switch attempt=\(attempt)")
-                return confirmed.map { .switched($0.selection) } ?? .failed("Codex did not confirm the new model")
-            }
+            menu = poll(timeout: 1.5) { CodexUI.modelMenu(near: composer) }
         }
         guard let openMenu = menu else {
-            DropdownModelPicker.logOpenFailure(window: window, pid: pid, attempt: attempt)
             // Only close this composer's menu while it still owns keyboard focus.
             closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("Codex's /model menu did not open")
         }
 
-        // Let the inline picker finish mounting before sending a selection key;
-        // the checks below still require the original input and the live menu.
+        // Allow the opened menu to settle before selecting; the existing live-menu
+        // and focus checks below still protect the draft.
         let readyAt = ProcessInfo.processInfo.systemUptime
         usleep(250_000)
         guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }

@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.11: restore the verified inline baseline
+
+Ethan rejected the unsuccessful recent picker experiments and requested the known working version plus a delay. Restore ModelSwitcher from 1.2.8 (da62431), remove the 1.2.9 dropdown adapter and its tests, and remove the 1.2.10 opening diagnostics and extended timeouts. The only switching changes against that baseline are 250 ms pauses after focus and after the inline menu appears, with user-input checks after each pause. Keep the independently verified catalogue, composer and main-window fixes from 1.2.8. Do not reintroduce the discarded dropdown approach without new evidence and Ethan's agreement (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+
+Installed 1.2.8 logs show successful Astra, Sol and Opus switches on September 26, but also opening failures later; restoring it does not prove compatibility with the currently running desktop. The last 1.2.10 failure exposed an AXGroup focus chain and no AXMenu nodes after the timeout. The delay experiment did not resolve that attempt. The historical entries below document rejected attempts, not current switching behavior. All 53 remaining automated tests pass. Desktop switching still needs live confirmation.
+
 ## 1.2.10: pacing is an unverified mitigation
 
 The user's next click after installing 1.2.9 still failed before either menu route was recognised. The installed attempt found the intended composer, sent the shortcut, and timed out; it never reached model selection. That proves the previous release did not resolve the reported case. It does not establish whether focus timing or menu discovery caused the failure. A passive follow-up capture observed ordinary navigation but no new toolbar attempt.
