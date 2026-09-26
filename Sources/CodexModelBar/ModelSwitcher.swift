@@ -3,11 +3,11 @@ import ApplicationServices
 import CodexModelBarCore
 
 /// Switches the open Codex chat to a chosen model through Codex's **`/model` menu**,
-/// opened with Codex's own keyboard shortcut (Control+Shift+M, the
-/// `composer.openModelPicker` command), so Codex applies the change through its
+/// opened with Codex's own keyboard shortcut (Control+Command+M, the
+/// `composer.openRecentModels` command), so Codex applies the change through its
 /// normal code path.
 ///
-/// Why this route (observed against Codex desktop 26.917 and its bundled source):
+/// Why this route (inline search observed on 26.917; shortcut updated for 26.924):
 ///  - No deep link, setting or public API switches the model of the *open* chat.
 ///  - The composer's model dropdown was redesigned (effort slider + model list view) and
 ///    driving it needed fragile focus-and-Space tricks that broke with the redesign.
@@ -18,14 +18,12 @@ import CodexModelBarCore
 ///
 /// Sequence:
 ///  1. Find the composer the user is working in (model button + message box).
-///  2. Focus the message box, verify, send Control+Shift+M, wait for the menu.
-///  3. If the target is under "Recent models", press its number. Nothing is typed.
-///     (A recent entry restores the effort and speed last used with that model.)
-///  4. Otherwise type the model's id as the menu's search (the menu reads its search
+///  2. Focus the message box, verify, send Control+Command+M, wait for the menu.
+///  3. Type the model's id as the menu's search (the menu reads its search
 ///     from the message box). Once the menu shows exactly one entry, the target, press
 ///     Return. Choosing removes the search text again; Codex keeps the current effort
 ///     when the new model supports it.
-///  5. Confirm the model button now names the target.
+///  4. Confirm the model button now names the target.
 ///
 /// Safety rules:
 ///  - Before **every** synthetic key, check that no real key was pressed in the last
@@ -125,7 +123,7 @@ final class ModelSwitcher {
         // Step 2: open the /model menu, unless the user already has it open.
         var menu = CodexUI.modelMenu(near: composer)
         if menu == nil {
-            Log.info("model-switch phase=open-menu shortcut=control-shift-m")
+            Log.info("model-switch phase=open-menu shortcut=control-command-m")
             let focusingAt = ProcessInfo.processInfo.systemUptime
             guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
             // Ethan requested the previously working inline route with a short pause,
@@ -134,12 +132,12 @@ final class ModelSwitcher {
             guard !Keyboard.userInteracted(since: focusingAt), isFocused(composer, pid: pid) else {
                 return .cancelledForTyping
             }
-            guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskShift], pid: pid) else {
+            guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskCommand], pid: pid) else {
                 return .cancelledForTyping
             }
             menu = poll(timeout: 1.5) { CodexUI.modelMenu(near: composer) }
         }
-        guard let openMenu = menu else {
+        guard menu != nil else {
             // Only close this composer's menu while it still owns keyboard focus.
             closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("Codex's /model menu did not open")
@@ -151,41 +149,8 @@ final class ModelSwitcher {
         usleep(250_000)
         guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }
 
-        // Step 3: a recent configuration is picked with its number key (Codex handles
-        // 1–3 while the menu's search is empty), so nothing is typed.
-        Log.info("/model menu open; recent entries: \(openMenu.recent.map(AX.title))")
-        if let index = openMenu.recent.firstIndex(where: {
-            CurrentModelMatcher.model(forTitle: AX.title($0), among: allModels)?.id == target.id
-        }), index < Keyboard.digits.count {
-            Log.info("choosing recent entry \(index + 1): '\(AX.title(openMenu.recent[index]))'")
-            guard let before = CodexUI.composerText(composer) else {
-                return .failed("message box became unavailable before choosing")
-            }
-            // Re-check right before the key: with the menu closed a digit would be typed.
-            guard CodexUI.modelMenu(near: composer) != nil, isFocused(composer, pid: pid) else {
-                return .failed("Codex's /model menu closed before choosing")
-            }
-            let chosenAt = ProcessInfo.processInfo.systemUptime
-            guard Keyboard.pressUnlessTyping(Keyboard.digits[index], pid: pid) else {
-                closeMenuIfOpen(composer: composer, pid: pid)
-                return .cancelledForTyping
-            }
-            let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
-                pid: pid, models: allModels, since: chosenAt, readOriginalAfterUserInput: true,
-                logPrefix: "model-switch attempt=\(attempt)")
-            // If the menu had closed after all, the digit landed in the message box.
-            let digit = String(index + 1)
-            if confirmed == nil {
-                let cleanup = removeTyped(digit, before: before, composer: composer, pid: pid, since: chosenAt)
-                Log.info("model-switch attempt=\(attempt) phase=cleanup result=\(cleanup)")
-                closeMenuIfOpen(composer: composer, pid: pid)
-                return .failed("Codex did not confirm the new model", searchLeft: cleanup == .remaining ? digit : nil)
-            }
-            return .switched(confirmed!.selection)
-        }
-
-        // Step 4: search the menu. Codex only treats digits as "pick recent entry N" while
-        // the search is empty, so the search must start with a letter.
+        // Always use the previously working typed search. Ethan rejected picker
+        // selection experiments; keep the pauses on this path (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         guard let query = searchQuery(for: target) else {
             closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("cannot search for \(target.id)")
@@ -226,6 +191,12 @@ final class ModelSwitcher {
             Log.info("search '\(query)' did not isolate \(target.id); entries: \(((menu?.recent ?? []) + (menu?.matching ?? [])).map(AX.title))")
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                  since: searchStartedAt, result: .failed("\(target.displayName) is not in Codex's /model menu"))
+        }
+        // Let the filtered result settle, then recheck before Return.
+        usleep(250_000)
+        guard !Keyboard.userInteracted(since: searchStartedAt) else {
+            return abandonSearch(typed, before: before, composer: composer, pid: pid,
+                                 since: searchStartedAt, result: .cancelledForTyping)
         }
         // Return is safe only while the menu is open: Codex's menu handles it first. Check
         // the menu and focus immediately before sending it.
@@ -362,8 +333,6 @@ enum Keyboard {
     static let escape: CGKeyCode = 53
     static let backspace: CGKeyCode = 51
     static let returnKey: CGKeyCode = 36
-    /// Keys 1, 2, 3 on the main row (Codex's recent-model shortcuts).
-    static let digits: [CGKeyCode] = [18, 19, 20]
 
     /// True when a real (hardware) key went down within `interval` seconds. Our own
     /// synthetic events are private-source events posted to one process, so they do not

@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.12: the updated shortcut selects a different interface
+
+The running 26.924.22138 bundle registers two distinct commands: `composer.openModelPicker` defaults to Control+Shift+M and opens the redesigned dropdown, while `composer.openRecentModels` defaults to Control+Command+M on macOS and calls the inline `model` slash-menu handler. The user's keybindings file has no override for either. The previous rollback retained the obsolete shortcut, so it still opened the wrong UI. Source evidence explains the observed menu mismatch; a live successful switch remains a separate check.
+
+Use Control+Command+M for the original inline typing menu, then always type the model ID and press Enter after a unique matching result is visible. Ethan specifically requested the typing mechanism with delays; remove numbered recent-entry selection. Preserve 250 ms pauses after focus, menu opening and search completion, and recheck user input and the menu before Enter. Do not reintroduce the dropdown adapter. Historical descriptions of Control+Shift+M below apply to the earlier desktop version, not the currently installed app.
+
 ## 1.2.11: restore the verified inline baseline
 
 Ethan rejected the unsuccessful recent picker experiments and requested the known working version plus a delay. Restore ModelSwitcher from 1.2.8 (da62431), remove the 1.2.9 dropdown adapter and its tests, and remove the 1.2.10 opening diagnostics and extended timeouts. The only switching changes against that baseline are 250 ms pauses after focus and after the inline menu appears, with user-input checks after each pause. Keep the independently verified catalogue, composer and main-window fixes from 1.2.8. Do not reintroduce the discarded dropdown approach without new evidence and Ethan's agreement (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).

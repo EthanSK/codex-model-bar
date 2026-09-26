@@ -4,7 +4,7 @@ import CodexModelBarCore
 
 /// Knowledge of Codex's UI as exposed to Accessibility (verified on desktop 26.917).
 ///
-/// Composer area, simplified. The `/model` menu (opened with Codex's own Control+Shift+M
+/// Composer area, simplified. The `/model` menu (opened with Codex's own Control+Command+M
 /// shortcut) is rendered **inline above the message box**, not in a portal:
 /// ```
 /// AXGroup                                  ← shared parent of menu + composer
