@@ -49,7 +49,10 @@ enum DropdownModelPicker {
     static func select(target: CodexModel, current: String?, models: [CodexModel], window: AXUIElement,
                        pid: pid_t, since started: TimeInterval, attempt: String) -> Bool {
         for step in 0..<2 {
-            let ready = ModelSwitcher.poll(timeout: 1.0) { () -> ([AXUIElement], Choice)? in
+            // Model rows can mount before the dropdown has finished its focus
+            // transition. Pause, then resolve the live items rather than old ones.
+            usleep(250_000)
+            let ready = ModelSwitcher.poll(timeout: 3.0) { () -> ([AXUIElement], Choice)? in
                 guard !Keyboard.userInteracted(since: started),
                       let menu = focusedMenu(window: window, pid: pid) else { return nil }
                 let items = AX.all(in: menu, limit: 2_500) { AX.role($0) == kAXMenuItemRole as String }
@@ -81,9 +84,29 @@ enum DropdownModelPicker {
         return false
     }
 
+    /// Record structure only when opening fails; never record chat or draft text.
+    static func logOpenFailure(window: AXUIElement, pid: pid_t, attempt: String) {
+        let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        var ancestors: [String] = []
+        var node = focused
+        for _ in 0..<8 {
+            guard let element = node else { break }
+            ancestors.append(CodexUI.identity(element))
+            node = AX.parent(element)
+        }
+        let menus = AX.all(in: window) { AX.role($0) == kAXMenuRole as String }
+        let structure = menus.map { menu in
+            let items = AX.all(in: menu, limit: 2_500) { AX.role($0) == kAXMenuItemRole as String }
+            return "\(CodexUI.identity(menu)):items=\(items.count):focused=\(AX.isFocused(menu))"
+        }
+        Log.info("model-switch attempt=\(attempt) phase=menu-open-timeout focusAncestors=[\(ancestors.joined(separator: ","))] menus=[\(structure.joined(separator: ","))]")
+    }
+
     /// Work mode may keep the dropdown open after selection. Escape restores the
     /// original composer; never send it after the user has taken over the menu.
     static func close(window: AXUIElement, pid: pid_t, since started: TimeInterval) {
+        // AXPress returning does not mean the web selection handler has finished.
+        usleep(250_000)
         for _ in 0..<2 {
             guard !Keyboard.userInteracted(since: started),
                   AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true,

@@ -130,12 +130,18 @@ final class ModelSwitcher {
         var menu = CodexUI.modelMenu(near: composer)
         if menu == nil {
             Log.info("model-switch phase=open-menu shortcut=control-shift-m")
-            guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
             let openedAt = ProcessInfo.processInfo.systemUptime
+            guard focus(composer, pid: pid) else { return .failed("could not focus the message box") }
+            // AX focus can arrive before Codex processes the focus event. Give its
+            // shortcut handler a moment, then check the same input again.
+            usleep(250_000)
+            guard !Keyboard.userInteracted(since: openedAt), isFocused(composer, pid: pid) else {
+                return .cancelledForTyping
+            }
             guard Keyboard.pressUnlessTyping(Keyboard.m, flags: [.maskControl, .maskShift], pid: pid) else {
                 return .cancelledForTyping
             }
-            _ = waitUntil(timeout: 1.5) {
+            _ = waitUntil(timeout: 3.0) {
                 menu = CodexUI.modelMenu(near: composer)
                 return menu != nil || DropdownModelPicker.focusedMenu(window: window, pid: pid) != nil
             }
@@ -152,10 +158,17 @@ final class ModelSwitcher {
             }
         }
         guard let openMenu = menu else {
+            DropdownModelPicker.logOpenFailure(window: window, pid: pid, attempt: attempt)
             // Only close this composer's menu while it still owns keyboard focus.
             closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("Codex's /model menu did not open")
         }
+
+        // Let the inline picker finish mounting before sending a selection key;
+        // the checks below still require the original input and the live menu.
+        let readyAt = ProcessInfo.processInfo.systemUptime
+        usleep(250_000)
+        guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }
 
         // Step 3: a recent configuration is picked with its number key (Codex handles
         // 1–3 while the menu's search is empty), so nothing is typed.

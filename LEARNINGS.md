@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.10: pacing is an unverified mitigation
+
+The user's next click after installing 1.2.9 still failed before either menu route was recognised. The installed attempt found the intended composer, sent the shortcut, and timed out; it never reached model selection. That proves the previous release did not resolve the reported case. It does not establish whether focus timing or menu discovery caused the failure. A passive follow-up capture observed ordinary navigation but no new toolbar attempt.
+
+At the user's suggestion, allow 250 ms after focusing the composer and before selecting from a newly opened menu, then recheck focus/user activity and resolve live menu entries. Allow three seconds for the menu to appear, and give a dropdown selection 250 ms before closing it. Failed opening diagnostics now record only focus ancestry, menu identities, item counts and focus flags. These delays are a mitigation to test, not a proven root-cause fix; a successful automated suite or signed installation must not be reported as a successful desktop switch. Do not remove earlier catalogue, composer identity or draft protections based on this timing hypothesis. All 56 automated tests passed; the signed 1.2.10 app was installed and restarted. Live model switching remains unverified.
+
 ## 1.2.9: the shortcut can open two different model menus
 
 On 2026-09-26, installed diagnostics showed the correct composer being located, followed by repeated “/model menu did not open” failures. Focus then belonged to an AXMenuItem and the modal menu temporarily hid the composer's model control, causing the following click to fail its initial lookup. The running app was `/Applications/ChatGPT.app` (26.924.22138), not the separate older `/Applications/Codex.app`; resolve the running executable before inspecting bundled renderer code. The running bundle contains both the inline Recent models/Matching models path and a dropdown handler for the same model-picker command. It is not evidence that the inline menu was removed.
