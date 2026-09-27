@@ -2,6 +2,10 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.17: halve the confirmed route's settling pauses
+
+On 2026-09-27, Ethan confirmed that 1.2.16 works after the catalogue and Custom-control fixes, then requested another halving of the delay. Reduce only the three fixed settling pauses from 150 ms to 75 ms, saving 225 ms when opening the menu. Preserve character pacing, live readiness polling, focus/draft checks and the typed-ID → Enter route. The 75 ms timing needs a user-triggered desktop switch; the earlier working timings remain documented below as recovery checkpoints.
+
 ## 1.2.16: recover when Codex labels the current model Custom
 
 On 2026-09-27, the screenshot showed only GPT-5.5, Opus and Fable in Codex's picker, with the current control labelled `Custom High`. The bar retained Astra and Sol in its catalogue, but its live lookup logged zero model buttons and refused to switch. A real Codex Custom control is still a model control; recognising only named models made the bar unable to help leave this state.
