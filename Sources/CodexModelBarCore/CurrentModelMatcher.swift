@@ -96,10 +96,14 @@ public enum CurrentModelMatcher {
         model(forTitle: title, among: models)
     }
 
-    /// True when `title` starts with one of the known model names. Used to pick the
+    /// True when `title` names a known model or Codex's Custom model control. Used to pick the
     /// composer's model button out of all the window's popup buttons (the others —
     /// permissions, chat actions, sidebar menus — never match).
     public static func isModelButtonTitle(_ title: String, among models: [CodexModel]) -> Bool {
-        model(forTitle: title, among: models) != nil
+        if model(forTitle: title, among: models) != nil { return true }
+        // Codex shows Custom when its current model is absent from its catalogue;
+        // recognise the control so the user can switch out, without guessing the model.
+        let text = normalize(title)
+        return text == "custom" || effortLabels.contains { text == "custom \($0.label)" }
     }
 }

@@ -15,6 +15,17 @@ private let catalogue: [CodexModel] = [
 ]
 
 final class CurrentModelMatcherTests: XCTestCase {
+    func testCustomModelControlCanBeLocatedWithoutInventingASelection() {
+        for title in ["Custom", "Custom High", "Custom Extra High"] {
+            XCTAssertTrue(CurrentModelMatcher.isModelButtonTitle(title, among: catalogue))
+            XCTAssertNil(CurrentModelMatcher.selection(forButtonTitle: title, among: catalogue).modelID)
+            XCTAssertFalse(CurrentModelMatcher.searchResultsOnlyMatch("gpt-6-astra", titles: [title], among: catalogue))
+        }
+        for title in ["Custom permissions", "Custom model settings", "Customize", "Custom High Other"] {
+            XCTAssertFalse(CurrentModelMatcher.isModelButtonTitle(title, among: catalogue))
+        }
+    }
+
     func testFilteredOpusRecentAndCatalogueResultsAllowReturn() {
         // Exact installed 1.2.13 failure: both sections exposed the same two choices.
         let titles = ["Opus 5.5 Extra High Standard",

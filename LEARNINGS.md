@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.16: recover when Codex labels the current model Custom
+
+On 2026-09-27, the screenshot showed only GPT-5.5, Opus and Fable in Codex's picker, with the current control labelled `Custom High`. The bar retained Astra and Sol in its catalogue, but its live lookup logged zero model buttons and refused to switch. A real Codex Custom control is still a model control; recognising only named models made the bar unable to help leave this state.
+
+Recognise exactly `Custom` or `Custom <known effort>` as a model control while keeping its model identity unknown. Continue to pair it with the focused composer, type the requested model ID, require all search results to identify that model and confirm its actual name afterward. Never treat Custom as a successful target selection. Preserve the user-confirmed 1.2.15 typing route and 150 ms pauses. Regression coverage rejects unrelated Custom-prefixed controls and verifies that Custom cannot satisfy target confirmation.
+
 ## 1.2.15: shorter settling pauses after live confirmation
 
 Ethan confirmed the typing route works. Installed 1.2.14 logs at 17:53 UTC also show successful Astra, Sol and Opus switches, including restored drafts, in about 1.1–1.6 seconds. At his request, shorten the three fixed settling pauses from 250 ms to 150 ms (300 ms less fixed waiting when opening the menu). Keep character pacing, readiness polling, focus checks and final confirmation unchanged. Do not replace the now-confirmed typing route with another picker mechanism. Ethan subsequently confirmed that installed 1.2.15 works with the shorter delay and asked to remember this point (2026-09-26). Treat code commit `04cb2f2670b20a0090d53643675037dc0e7dce2a` as the user-confirmed working checkpoint: Control+Command+M, typed model ID, target-only result check, Enter, and three 150 ms settling pauses. Preserve this mechanism when making later changes; the earlier dropdown experiments were rejected.
