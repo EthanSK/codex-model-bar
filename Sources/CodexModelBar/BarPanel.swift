@@ -20,7 +20,7 @@ final class BarPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
-        hidesOnDeactivate = false        // we are never "active"; visibility is managed by AppController
+        hidesOnDeactivate = false        // visibility is managed by AppController, including the brief keyboard-focus handoff
         becomesKeyOnlyIfNeeded = true
         isMovable = false
         // Follow the user across Spaces and sit beside full-screen windows; the tracker

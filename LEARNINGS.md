@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.18: a non-activating panel can own keys while Codex stays active
+
+On 2026-09-28, Ethan reported that switches typed the model ID but did not finish while Agent Flow's panel was open. Agent Flow's typing editor deliberately makes its non-activating panel key. A disposable three-process AppKit reproduction confirmed that the target remained frontmost while the panel owned the system-wide focused element. Repeating activation, activate-all-windows, activation-from-caller, AXRaise, AXFocused and process-targeted mouse clicks did not release that ownership. Do not replace actual keyboard ownership with an active-app or per-app AX focus check, or try to fix this state by adding delay.
+
+The successful native reproduction activated a separate accessory app, then reactivated the target; system keyboard ownership returned to the target and the panel stayed open. Model Bar now uses that handoff only when Codex is already active but another process owns the keyboard, and verifies actual ownership before switching and at each composer-focus check. It preserves the typed-ID/Enter route and 75 ms pauses. Hardware input during acquisition cancels rather than reclaiming focus after the user moves away. No Agent Flow settings, recording lifecycle or source changes are involved. Native reproduction and automated tests are separate evidence from a live Codex/Agent Flow switch, which was not automated because Codex UI control is unavailable.
+
 ## 1.2.17: halve the confirmed route's settling pauses
 
 On 2026-09-27, Ethan confirmed that 1.2.16 works after the catalogue and Custom-control fixes, then requested another halving of the delay. Reduce only the three fixed settling pauses from 150 ms to 75 ms, saving 225 ms when opening the menu. Preserve character pacing, live readiness polling, focus/draft checks and the typed-ID → Enter route. The 75 ms timing needs a user-triggered desktop switch; the earlier working timings remain documented below as recovery checkpoints.

@@ -49,6 +49,15 @@ enum AX {
         attribute(element, kAXFocusedAttribute) ?? false
     }
 
+    /// Actual keyboard owner, including a non-activating panel over the active app.
+    static func keyboardOwnerPID() -> pid_t? {
+        guard let focused: AXUIElement = attribute(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute)
+        else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(focused, &pid) == .success else { return nil }
+        return pid
+    }
+
     /// Performs the element's default action (a click, for buttons and menu items).
     @discardableResult
     static func press(_ element: AXUIElement) -> Bool {

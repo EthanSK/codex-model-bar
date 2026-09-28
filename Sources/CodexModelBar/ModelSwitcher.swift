@@ -71,15 +71,34 @@ final class ModelSwitcher {
             }
         }
 
-        // Codex only handles its shortcut while it is the active app. Clicking the bar
-        // never deactivates Codex (non-activating panel), but guard anyway.
-        if !codex.isActive { codex.activate() }
         let pid = codex.processIdentifier
+        let requestedAt = ProcessInfo.processInfo.systemUptime
         AX.queue.async {
             Log.info("model-switch attempt=\(attempt) phase=start pid=\(pid) target=\(target.id)")
-            guard Self.waitUntil(timeout: 1.0, { codex.isActive }) else {
+            guard !Keyboard.userInteracted(since: requestedAt) else {
+                finish(.cancelledForTyping)
+                return
+            }
+            if codex.isActive, let owner = AX.keyboardOwnerPID(), owner != pid {
+                // Agent Flow's non-activating typing panel can own keys while Codex
+                // stays active. Native testing proved reactivating Codex alone does
+                // nothing; activating our accessory first releases that panel's key
+                // ownership without closing it or changing the typing route.
+                Log.info("model-switch attempt=\(attempt) phase=release-panel-keyboard owner=\(owner)")
+                DispatchQueue.main.sync { NSApp.activate(ignoringOtherApps: true) }
+                guard Self.waitUntil(timeout: 0.6, { NSRunningApplication.current.isActive }) else {
+                    finish(.failed("could not release the floating panel's keyboard focus"))
+                    return
+                }
+            }
+            guard !Keyboard.userInteracted(since: requestedAt) else {
+                finish(.cancelledForTyping)
+                return
+            }
+            DispatchQueue.main.sync { _ = codex.activate() }
+            guard Self.waitUntil(timeout: 1.0, { codex.isActive && AX.keyboardOwnerPID() == pid }) else {
                 Log.info("model-switch attempt=\(attempt) phase=finish result=inactive")
-                finish(.failed("Codex did not become active"))
+                finish(.failed("Codex did not receive keyboard focus"))
                 return
             }
             AX.enableWebAccessibility(pid: pid)

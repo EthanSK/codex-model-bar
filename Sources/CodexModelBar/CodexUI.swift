@@ -48,6 +48,7 @@ enum CodexUI {
     /// input itself retains AXFocused. Never accept a different focused input.
     static func composerHasFocus(_ composer: AXUIElement, pid: pid_t) -> Bool {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              AX.keyboardOwnerPID() == pid,
               let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
         else { return false }
         if CFEqual(focused, composer) { return true }
