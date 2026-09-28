@@ -2,6 +2,10 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.20: halve only the fixed pauses between switch actions
+
+Ethan asked to halve the delay again after using 1.2.19. That installed version recorded 19 completed switches and one unconfirmed switch in the available log; the unconfirmed attempt stopped after user or window activity, not a proven menu-timing failure. Change the three fixed 75 ms pauses to 37.5 ms, reducing the fixed wait by 112.5 ms per normal switch. Keep the 8 ms character pacing, live menu readiness polling, focus/draft checks, and typed-ID/Return route unchanged. Automated checks and installation alone do not prove the shorter pauses work in every live Codex state.
+
 ## 1.2.19: a floating panel can take focus back during a search
 
 The installed 1.2.18 log on 2026-09-28 showed three successful Sol/Astra switches and two failed Astra attempts in the same side chat. Both failures happened after the bar opened the inline menu and typed the model ID, but before Return. The next attempt found Agent Flow owning the keyboard again. That supports a mid-switch focus race; the older failure log did not record keyboard ownership at the exact failure, so it does not prove Agent Flow caused both failures.
