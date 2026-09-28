@@ -2,6 +2,12 @@
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
 
+## 1.2.19: a floating panel can take focus back during a search
+
+The installed 1.2.18 log on 2026-09-28 showed three successful Sol/Astra switches and two failed Astra attempts in the same side chat. Both failures happened after the bar opened the inline menu and typed the model ID, but before Return. The next attempt found Agent Flow owning the keyboard again. That supports a mid-switch focus race; the older failure log did not record keyboard ownership at the exact failure, so it does not prove Agent Flow caused both failures.
+
+When another process owns the keyboard while Codex remains frontmost, restore Codex focus only if no hardware key or mouse press occurred during the search. Re-read the same window and exact composer, remove only the bar's verified search text, close its menu if present, then retry the same typed-ID/Return route once. Do not retry when the user interacted, the composer changed, or the draft cannot be restored. Log keyboard ownership at the menu failure. Automated tests and a signed installation do not establish that the recovery works in a real Codex/Agent Flow switch; that remains unverified until a natural interrupted attempt occurs.
+
 ## 1.2.18: a non-activating panel can own keys while Codex stays active
 
 On 2026-09-28, Ethan reported that switches typed the model ID but did not finish while Agent Flow's panel was open. Agent Flow's typing editor deliberately makes its non-activating panel key. A disposable three-process AppKit reproduction confirmed that the target remained frontmost while the panel owned the system-wide focused element. Repeating activation, activate-all-windows, activation-from-caller, AXRaise, AXFocused and process-targeted mouse clicks did not release that ownership. Do not replace actual keyboard ownership with an active-app or per-app AX focus check, or try to fix this state by adding delay.

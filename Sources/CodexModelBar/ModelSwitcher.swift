@@ -111,7 +111,8 @@ final class ModelSwitcher {
 
     // MARK: - Steps (all on AX.queue)
 
-    private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t, attempt: String) -> Result {
+    private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t,
+                                      attempt: String, retriesRemaining: Int = 1) -> Result {
         // Step 1: current model and message box.
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
         let initialFocus: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
@@ -183,14 +184,20 @@ final class ModelSwitcher {
         }
         let searchStartedAt = ProcessInfo.processInfo.systemUptime
         var typed = ""
+        let retryAfterPanelLoss: (() -> Result)? = retriesRemaining > 0 ? {
+            performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt, retriesRemaining: 0)
+        } : nil
         for character in query {
             guard isFocused(composer, pid: pid) else {
                 return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                     since: searchStartedAt, result: .failed("message box lost focus while searching"))
+                                     since: searchStartedAt, result: .failed("message box lost focus while searching"),
+                                     window: window, models: allModels, allowPanelRecovery: true,
+                                     retryAfterPanelLoss: retryAfterPanelLoss)
             }
             guard Keyboard.typeUnlessTyping(character, pid: pid) else {
                 return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                     since: searchStartedAt, result: .cancelledForTyping)
+                                     since: searchStartedAt, result: .cancelledForTyping,
+                                     window: window, models: allModels, retryAfterPanelLoss: nil)
             }
             typed.append(character)
             usleep(8_000)
@@ -206,29 +213,36 @@ final class ModelSwitcher {
         }
         guard onlyTarget == true else {
             let menu = CodexUI.modelMenu(near: composer)
-            Log.info("search '\(query)' did not isolate \(target.id); entries: \(((menu?.recent ?? []) + (menu?.matching ?? [])).map(AX.title))")
+            Log.info("model-switch attempt=\(attempt) phase=search-not-isolated target=\(target.id) keyboardOwner=\(AX.keyboardOwnerPID().map(String.init) ?? "none") entries=\(((menu?.recent ?? []) + (menu?.matching ?? [])).map(AX.title))")
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                 since: searchStartedAt, result: .failed("\(target.displayName) is not in Codex's /model menu"))
+                                 since: searchStartedAt, result: .failed("\(target.displayName) is not in Codex's /model menu"),
+                                 window: window, models: allModels, allowPanelRecovery: true,
+                                 retryAfterPanelLoss: retryAfterPanelLoss)
         }
         // Let the filtered result settle, then recheck before Return.
         usleep(75_000)
         guard !Keyboard.userInteracted(since: searchStartedAt) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                 since: searchStartedAt, result: .cancelledForTyping)
+                                 since: searchStartedAt, result: .cancelledForTyping,
+                                 window: window, models: allModels, retryAfterPanelLoss: nil)
         }
         // Return is safe only while the menu is open: Codex's menu handles it first. Check
         // the menu and focus immediately before sending it.
         guard let finalMenu = CodexUI.modelMenu(near: composer), isFocused(composer, pid: pid),
               CurrentModelMatcher.searchResultsOnlyMatch(target.id,
                   titles: (finalMenu.recent + finalMenu.matching).map(AX.title), among: allModels) else {
+            Log.info("model-switch attempt=\(attempt) phase=before-choice-lost keyboardOwner=\(AX.keyboardOwnerPID().map(String.init) ?? "none")")
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                 since: searchStartedAt, result: .failed("Codex's /model menu closed before choosing"))
+                                 since: searchStartedAt, result: .failed("Codex's /model menu closed before choosing"),
+                                 window: window, models: allModels, allowPanelRecovery: true,
+                                 retryAfterPanelLoss: retryAfterPanelLoss)
         }
         Log.info("choosing search result for '\(query)' with Return")
         let chosenAt = ProcessInfo.processInfo.systemUptime
         guard Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
-                                 since: searchStartedAt, result: .cancelledForTyping)
+                                 since: searchStartedAt, result: .cancelledForTyping,
+                                 window: window, models: allModels, retryAfterPanelLoss: nil)
         }
         let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
             pid: pid, models: allModels, since: chosenAt, readOriginalAfterUserInput: true,
@@ -263,7 +277,44 @@ final class ModelSwitcher {
     /// Removes the search we typed (only if it is provably the sole change), then
     /// closes the menu. Returns `result`, marked when the search could not be removed.
     private static func abandonSearch(_ typed: String, before: String, composer: AXUIElement,
-                                      pid: pid_t, since started: TimeInterval, result: Result) -> Result {
+                                      pid: pid_t, since started: TimeInterval, result: Result,
+                                      window: AXUIElement, models: [CodexModel],
+                                      allowPanelRecovery: Bool = false,
+                                      retryAfterPanelLoss: (() -> Result)?) -> Result {
+        if allowPanelRecovery,
+           !Keyboard.userInteracted(since: started),
+           NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+           let owner = AX.keyboardOwnerPID(), owner != pid,
+           let codex = NSRunningApplication(processIdentifier: pid), codex.isActive {
+            // Agent Flow can make its non-activating panel key again after the search
+            // starts. Retry only after reclaiming focus, proving the same composer is
+            // still live, and removing exactly the search we typed.
+            Log.info("model-switch phase=panel-interrupted-search owner=\(owner)")
+            DispatchQueue.main.sync { NSApp.activate(ignoringOtherApps: true) }
+            if waitUntil(timeout: 0.6, { NSRunningApplication.current.isActive }),
+               !Keyboard.userInteracted(since: started) {
+                DispatchQueue.main.sync { _ = codex.activate() }
+                if waitUntil(timeout: 1.0, { codex.isActive && AX.keyboardOwnerPID() == pid }),
+                   !Keyboard.userInteracted(since: started),
+                   AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true,
+                   let current = CodexUI.Cache.current(window: window, models: models, forceRefresh: true).composer,
+                   CFEqual(current, composer) {
+                    let recovered = removeTyped(typed, before: before, composer: composer, pid: pid, since: started)
+                    Log.info("model-switch phase=panel-search-recovery cleanup=\(recovered)")
+                    if recovered == .restored {
+                        closeMenuIfOpen(composer: composer, pid: pid)
+                        guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
+                        if let retryAfterPanelLoss {
+                            Log.info("model-switch phase=retry-after-panel-focus-loss")
+                            return retryAfterPanelLoss()
+                        }
+                        return result
+                    }
+                    if recovered == .remaining { return markSearchLeft(typed, result) }
+                    return result
+                }
+            }
+        }
         let cleanup = removeTyped(typed, before: before, composer: composer, pid: pid, since: started)
         Log.info("model-switch phase=cleanup result=\(cleanup)")
         if cleanup == .remaining {
