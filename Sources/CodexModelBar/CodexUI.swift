@@ -181,6 +181,33 @@ enum CodexUI {
     static let recentHeader = "Recent models"
     static let matchingHeader = "Matching models"
 
+    static func ultrafastCommand(near composer: AXUIElement) -> (AXUIElement, UltrafastCommandState)? {
+        // Follow only this composer's nearest web area; an embedded browser or
+        // another window cannot supply the command. Ordinary speed controls lack
+        // the slash command's full description and never satisfy this predicate.
+        var ancestor = AX.parent(composer)
+        var steps = 0
+        while let node = ancestor, AX.role(node) != "AXWebArea", steps < 60 {
+            ancestor = AX.parent(node)
+            steps += 1
+        }
+        guard let root = ancestor, AX.role(root) == "AXWebArea" else { return nil }
+        var stack = AX.children(root), matches: [(AXUIElement, UltrafastCommandState)] = []
+        var count = 0
+        while let node = stack.popLast() {
+            count += 1
+            guard count <= 30_000 else { return nil }
+            if AX.role(node) == "AXWebArea" { continue }
+            if AX.role(node) == kAXButtonRole as String,
+               let state = UltrafastCommandState.read(title: AX.title(node)),
+               (AX.attribute(node, kAXEnabledAttribute) as Bool?) == true {
+                matches.append((node, state))
+            }
+            stack.append(contentsOf: AX.children(node))
+        }
+        return matches.count == 1 ? matches.first : nil
+    }
+
     /// The typing menu may be a portal anywhere in this composer's web area.
     /// Require focus on this input before using the window-wide menu lookup.
     static func modelMenu(near composer: AXUIElement) -> ModelMenu? {

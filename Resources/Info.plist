@@ -27,5 +27,10 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array><dict>
+		<key>CFBundleURLName</key><string>com.ethansk.codex-model-bar.mouse</string>
+		<key>CFBundleURLSchemes</key><array><string>codex-model-bar</string></array>
+	</dict></array>
 </dict>
 </plist>

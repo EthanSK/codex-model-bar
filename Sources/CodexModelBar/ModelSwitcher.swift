@@ -59,8 +59,8 @@ final class ModelSwitcher {
 
     /// Starts a switch. `completion` runs on the main thread.
     func switchModel(to target: CodexModel, allModels: [CodexModel], codex: NSRunningApplication,
-                     completion: @escaping (Result) -> Void) {
-        guard !busy else { return }
+                     enableUltrafast: Bool = false, completion: @escaping (Result) -> Void) {
+        guard !busy else { completion(.failed("Another model switch is in progress")); return }
         busy = true
         let attempt = String(UUID().uuidString.prefix(8))
         Log.info("model-switch attempt=\(attempt) phase=request target=\(target.id)")
@@ -103,7 +103,8 @@ final class ModelSwitcher {
             }
             AX.enableWebAccessibility(pid: pid)
             let started = Date()
-            let result = Self.performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt)
+            let result = Self.performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt,
+                                           enableUltrafast: enableUltrafast)
             Log.info("model-switch attempt=\(attempt) phase=finish target=\(target.id) result=\(result) elapsed=\(String(format: "%.2f", Date().timeIntervalSince(started)))s")
             finish(result)
         }
@@ -112,8 +113,9 @@ final class ModelSwitcher {
     // MARK: - Steps (all on AX.queue)
 
     private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t,
-                                      attempt: String, retriesRemaining: Int = 1) -> Result {
+                                      attempt: String, retriesRemaining: Int = 1, enableUltrafast: Bool = false) -> Result {
         // Step 1: current model and message box.
+        let switchStartedAt = ProcessInfo.processInfo.systemUptime
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
         let initialFocus: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
         var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
@@ -137,6 +139,7 @@ final class ModelSwitcher {
         Log.info("model-switch attempt=\(attempt) phase=located composer=\(CodexUI.identity(composer)) button=\(CodexUI.identity(button)) scopes=[\(located.scopeAncestors.map(CodexUI.identity).joined(separator: ","))]")
         let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
         if current.modelID == target.id {
+            if enableUltrafast { return selectUltrafast(original: located, window: window, pid: pid, models: allModels, selection: current, since: switchStartedAt) }
             return .alreadyCurrent(current)
         }
 
@@ -185,7 +188,8 @@ final class ModelSwitcher {
         let searchStartedAt = ProcessInfo.processInfo.systemUptime
         var typed = ""
         let retryAfterPanelLoss: (() -> Result)? = retriesRemaining > 0 ? {
-            performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt, retriesRemaining: 0)
+            performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt, retriesRemaining: 0,
+                          enableUltrafast: enableUltrafast)
         } : nil
         for character in query {
             guard isFocused(composer, pid: pid) else {
@@ -259,7 +263,82 @@ final class ModelSwitcher {
         }
         Log.info("model-switch attempt=\(attempt) phase=search-cleanup result=\(cleanup) modelConfirmed=\(confirmed != nil)")
         if confirmed == nil { closeMenuIfOpen(composer: composer, pid: pid) }
+        if enableUltrafast, let confirmed, cleanup == .restored,
+           !Keyboard.userInteracted(since: searchStartedAt) {
+            return selectUltrafast(original: confirmed.located, window: window, pid: pid,
+                                  models: allModels, selection: confirmed.selection, since: switchStartedAt)
+        }
+        if enableUltrafast { return .failed("Astra/Ultrafast change could not be confirmed") }
         return searchResult(confirmed: confirmed?.selection, cleanup: cleanup, query: typed)
+    }
+
+    /// Inspect /ultrafast in the same composer, choose it only when OFF, then
+    /// inspect again to confirm ON. Return is never sent without the exact live
+    /// command entry, so an unavailable command cannot submit the user's draft.
+    private static func selectUltrafast(original: CodexUI.Located, window: AXUIElement, pid: pid_t,
+                                       models: [CodexModel], selection: CurrentSelection, since started: TimeInterval) -> Result {
+        guard !Keyboard.userInteracted(since: started), selection.modelID == MouseShortcut.astraModelID,
+              let identity = original.identity, let composer = original.composer,
+              focus(composer, pid: pid), CodexUI.modelMenu(near: composer) == nil,
+              let before = CodexUI.composerText(composer),
+              AX.string(composer, kAXSelectedTextAttribute).isEmpty else {
+            return .failed("Could not safely open Ultrafast in this composer")
+        }
+        func sameComposer() -> Bool {
+            guard !Keyboard.userInteracted(since: started),
+                  AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true,
+                  isFocused(composer, pid: pid) else { return false }
+            let current = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
+            return current.identity.map { identity.matches($0, equals: { CFEqual($0, $1) }) } == true
+                && current.modelButton.map { CurrentModelMatcher.selection(forButtonTitle: AX.title($0), among: models).modelID } == selection.modelID
+        }
+        let query = "/ultrafast"
+        func inspectCommand() -> (AXUIElement, UltrafastCommandState)? {
+            guard sameComposer(), CodexUI.composerText(composer) == before else { return nil }
+            var typed = ""
+            for character in query {
+                guard !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid),
+                      Keyboard.typeUnlessTyping(character, pid: pid) else {
+                    _ = removeTyped(typed, before: before, composer: composer, pid: pid, since: started)
+                    return nil
+                }
+                typed.append(character)
+                usleep(8_000)
+            }
+            return poll(timeout: 1.5) {
+                guard sameComposer(), ComposerText.cleanupState(query, before: before, after: CodexUI.composerText(composer)) == .remaining else { return nil }
+                return CodexUI.ultrafastCommand(near: composer)
+            }
+        }
+        func cleanup() -> Bool {
+            guard !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid) else { return false }
+            let restored = removeTyped(query, before: before, composer: composer, pid: pid, since: started) == .restored
+            if restored { _ = Keyboard.pressUnlessTyping(Keyboard.escape, pid: pid) }
+            return restored
+        }
+        guard let (_, state) = inspectCommand() else {
+            let restored = cleanup()
+            return .failed("Ultrafast is unavailable or its command could not be read", searchLeft: restored ? nil : (ComposerText.cleanupState(query, before: before, after: CodexUI.composerText(composer)) == .remaining ? query : nil))
+        }
+        if state == .enabled {
+            guard cleanup() else { return .failed("Could not restore the draft after checking Ultrafast") }
+            Log.info("mouse-shortcut result=confirmed model=gpt-6-astra speed=ultrafast alreadyEnabled=true")
+            return .alreadyCurrent(selection)
+        }
+        guard sameComposer(), CodexUI.ultrafastCommand(near: composer)?.1 == .disabled,
+              Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
+            _ = cleanup()
+            return .failed("Ultrafast command changed before selection")
+        }
+        guard waitUntil(timeout: 1.5, { CodexUI.composerText(composer) == before }),
+              let _ = inspectCommand(),
+              poll(timeout: 1.5, { sameComposer() && CodexUI.ultrafastCommand(near: composer)?.1 == .enabled ? true : nil }) == true else {
+            _ = cleanup()
+            return .failed("Astra selected; Ultrafast could not be confirmed")
+        }
+        guard cleanup() else { return .failed("Ultrafast enabled; draft restoration could not be confirmed") }
+        Log.info("mouse-shortcut result=confirmed model=gpt-6-astra speed=ultrafast alreadyEnabled=false")
+        return .switched(selection)
     }
 
     static func searchResult(confirmed: CurrentSelection?, cleanup: ComposerText.CleanupState, query: String) -> Result {

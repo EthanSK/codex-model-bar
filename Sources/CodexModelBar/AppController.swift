@@ -156,7 +156,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func switchTo(_ model: CodexModel) {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard urls.count == 1, let url = urls.first, MouseShortcut.isAstraUltrafast(url) else { return }
+        guard let model = allModels.first(where: { $0.id == MouseShortcut.astraModelID }) else {
+            barView.showStatus("GPT-6 Astra is unavailable", color: .systemOrange)
+            return
+        }
+        Log.info("mouse-shortcut request=astra-ultrafast")
+        switchTo(model, enableUltrafast: true)
+    }
+
+    private func switchTo(_ model: CodexModel, enableUltrafast: Bool = false) {
         guard AX.isTrusted else {
             updateTrustStatus(prompt: true)
             return
@@ -165,12 +175,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         barView.setBusyModel(id: model.id)
         barView.showStatus(nil)
         watcher.setSuspended(true)
-        switcher.switchModel(to: model, allModels: allModels, codex: codex) { [weak self] result in
+        switcher.switchModel(to: model, allModels: allModels, codex: codex, enableUltrafast: enableUltrafast) { [weak self] result in
             guard let self else { return }
             self.barView.setBusyModel(id: nil)
             switch result {
             case .switched(let selection), .alreadyCurrent(let selection):
                 self.barView.setCurrentSelection(selection)
+                if enableUltrafast { self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue) }
                 self.watcher.refreshSoon()
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
@@ -185,7 +196,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.watcher.refreshSoon()
             case .failed(let reason, nil):
                 Log.info("switch to \(model.id) failed: \(reason)")
-                self.barView.showStatus("Failed to switch to \(model.displayName)", color: .systemRed)
+                self.barView.showStatus(enableUltrafast ? reason : "Failed to switch to \(model.displayName)", color: .systemRed)
                 self.watcher.refreshSoon()
             }
             self.watcher.setSuspended(false)

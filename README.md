@@ -50,3 +50,5 @@ The switcher uses Codex's inline `/model` menu, with 37.5 ms settling pauses. It
 Contributions and issue reports are welcome. Please include the Codex desktop version and macOS version when reporting a model-switching problem, and remove personal task content from screenshots or logs.
 
 MIT licensed. Codex Model Bar is an independent side project, not affiliated with or endorsed by OpenAI or Anthropic. Codex, ChatGPT and Claude are trademarks of their respective owners.
+
+Agentic Mouse can request GPT-6 Astra with Ultrafast through the fixed local URL `codex-model-bar://astra-ultrafast`. The bar switches the focused composer using its existing model menu, then inspects `/ultrafast`. It selects the command only when Ultrafast is off and checks the command again to confirm it is on. Repeating the request keeps Ultrafast enabled. Unavailable commands, ambiguous entries, selected draft text or intervening input stop the action. This requires an eligible Codex account; it does not send a chat message. Live Codex UI acceptance of this new combined action remains unverified.

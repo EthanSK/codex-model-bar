@@ -1,3 +1,9 @@
+# Learnings
+
+## 1.2.21: Astra and Ultrafast use one composer-owned journey
+
+The installed Codex renderer registers speed slash commands dynamically as `service-tier:<id>`. Selecting the already selected tier sets null and returns to Standard; the keyboard fast-mode command cycles available tiers. Neither is an unconditional enable action. Inspect the exact Ultrafast command description, choose only its disabled state, and re-inspect the enabled description without selecting it again. Keep the same composer identity, model, window and draft across the two steps; refuse to type over a selection or press Return without the exact enabled command entry. The fixed companion URL accepts no arbitrary model or text. Automated checks and installation do not establish live Codex acceptance; Computer Use refuses the Codex bundle in this environment.
+
 # Compatibility notes
 
 These observations describe the macOS Codex desktop interfaces the bar currently uses. They are implementation notes, not a public API promise.
