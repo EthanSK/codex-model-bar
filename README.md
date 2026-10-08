@@ -37,9 +37,11 @@ The switcher uses Codex's inline `/model` menu, with 37.5 ms settling pauses. It
 
 ### Response speed
 
-The three icons at the right choose **Standard** (gauge), **Fast** (outline bolt), or **Ultrafast** (filled bolt). Hover for the name. They select an explicit choice in Codex's own Speed submenu, so clicking the same speed again keeps it selected. Fast uses more account usage. Codex decides which choices your current model and account support; the bar reports an unavailable choice rather than changing models or sending a message. It confirms the speed from Codex's accessible control and preserves the draft. The icons are action buttons, not a cached speed indicator.
+The three icons at the right choose **Standard** (gauge), **Fast** (single bolt), or **Ultrafast** (double bolt). Hover for the name. They type Codex's `/fast` or `/ultrafast` command and press Enter only after reading its exact live menu entry. Those commands toggle; the bar reads their descriptions first so clicking an already selected speed keeps it selected. Standard turns off whichever speed command is active. Fast uses more account usage. Unsupported choices report an error rather than changing models or sending a message. The bar confirms the changed command state and preserves the draft. The icons are action buttons, not a cached speed indicator.
 
-Speed parsing, layout and click dispatch have automated coverage. Manual layout and icon-dispatch checks use the production bar in an isolated native fixture; these do not prove live Codex submenu acceptance, which remains unverified where Computer Use blocks access to Codex. Native desktop updates can change the submenu's accessible names or actions.
+Speed-command parsing, wheel steps, layout and click dispatch have automated coverage. Manual checks use the production bar in an isolated native fixture; these do not prove live Codex command acceptance, which remains unverified where Computer Use blocks access to Codex. Native desktop updates can change the command descriptions or keyboard handling.
+
+`codex-model-bar://speed-up` and `codex-model-bar://speed-down` step through the current composer's available choices in Standard → Fast → Ultrafast order, stopping at either end. Agentic Mouse uses these for hold-and-wheel ratchets. Open these URLs without activating the bar, while Codex is active. Each ratchet is queued on the existing serial Accessibility queue and reads the actual speed again; a new key or mouse click cancels pending work rather than applying it to a chat the user moved away from. These URLs never force Astra or another model.
 
 ## Limits and privacy
 

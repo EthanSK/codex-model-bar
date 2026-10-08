@@ -60,10 +60,10 @@ final class BarWidthTests: XCTestCase {
             button.performClick(nil)
         }
         XCTAssertEqual(selected, [.standard, .standard, .fast, .fast, .ultrafast, .ultrafast])
-        bar.setBusySpeed(.fast)
+        bar.setBusySpeed(true)
         XCTAssertTrue(speeds.allSatisfy { !$0.isEnabled })
         XCTAssertTrue(bar.subviews.compactMap { $0 as? ModelButton }.allSatisfy { !$0.isEnabled })
-        bar.setBusySpeed(nil)
+        bar.setBusySpeed(false)
         XCTAssertTrue(speeds.allSatisfy(\.isEnabled))
     }
 

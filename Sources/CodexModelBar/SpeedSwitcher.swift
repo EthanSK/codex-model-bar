@@ -2,154 +2,131 @@ import AppKit
 import ApplicationServices
 import CodexModelBarCore
 
-/// Sets a speed through Codex's native submenu. Its items set an explicit tier;
-/// `/fast` and `/ultrafast` instead toggle an already selected tier back to Standard.
+/// Uses the typed slash route Ethan requested after the native speed-menu adapter
+/// failed. Do not restore that picker fallback (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
 final class SpeedSwitcher {
-    enum Result {
-        case changed
-        case cancelledForTyping
-        case failed(String)
-    }
-
-    private var busy = false
+    enum Request { case select(ResponseSpeed), increase, decrease }
+    enum Result { case changed(ResponseSpeed), cancelledForTyping, failed(String) }
+    private var pendingCount = 0
+    var isBusy: Bool { pendingCount > 0 }
 
     func setSpeed(_ target: ResponseSpeed, allModels: [CodexModel], codex: NSRunningApplication,
                   completion: @escaping (Result) -> Void) {
-        guard !busy else { return }
-        busy = true
+        change(.select(target), allModels: allModels, codex: codex, completion: completion)
+    }
+
+    func change(_ request: Request, allModels: [CodexModel], codex: NSRunningApplication,
+                completion: @escaping (Result) -> Void) {
+        pendingCount += 1 // Every wheel ratchet is queued on AX.queue; do not drop steps while a command is running.
         let requestedAt = ProcessInfo.processInfo.systemUptime
         let attempt = String(UUID().uuidString.prefix(8))
-        Log.info("speed-switch attempt=\(attempt) phase=start speed=\(target.rawValue)")
+        Log.info("speed-switch attempt=\(attempt) phase=start request=\(request)")
         AX.queue.async {
-            let result = Self.perform(target, models: allModels, codex: codex, since: requestedAt)
+            let result = Self.perform(request, models: allModels, codex: codex, since: requestedAt)
             Log.info("speed-switch attempt=\(attempt) phase=finish result=\(result)")
             DispatchQueue.main.async {
-                self.busy = false
+                self.pendingCount -= 1
                 completion(result)
             }
         }
     }
 
-    private static func perform(_ target: ResponseSpeed, models: [CodexModel], codex: NSRunningApplication,
+    private static func perform(_ request: Request, models: [CodexModel], codex: NSRunningApplication,
                                 since started: TimeInterval) -> Result {
         let pid = codex.processIdentifier
+        Log.info("speed-switch phase=focus active=\(codex.isActive) pid=\(pid) owner=\(AX.keyboardOwnerPID().map(String.init) ?? "none")")
         guard codex.isActive else { return .failed("Codex is not active") }
+        guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
+        if let owner = AX.keyboardOwnerPID(), owner != pid {
+            DispatchQueue.main.sync { NSApp.activate(ignoringOtherApps: true) } // Release Agent Flow's non-activating panel as the model switcher already does.
+            guard ModelSwitcher.waitUntil(timeout: 0.6, { NSRunningApplication.current.isActive }) else {
+                return .failed("Could not release the floating panel's keyboard focus")
+            }
+            guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
+            DispatchQueue.main.sync { _ = codex.activate() }
+        }
+        guard ModelSwitcher.waitUntil(timeout: 1, { codex.isActive && AX.keyboardOwnerPID() == pid }) else {
+            return .failed("Codex did not receive keyboard focus")
+        }
         guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
         AX.enableWebAccessibility(pid: pid)
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("No Codex window") }
         let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
-        guard let composer = located.composer, let modelButton = located.modelButton,
-              let original = located.identity, let draft = CodexUI.composerText(composer),
-              let root = webArea(containing: composer) else { return .failed("No task composer") }
-        let restoreComposerFocus = CodexUI.composerHasFocus(composer, pid: pid)
-
+        guard let composer = located.composer, let original = located.identity,
+              let modelButton = located.modelButton, let draft = CodexUI.composerText(composer) else {
+            return .failed("No task composer")
+        }
+        let modelID = CurrentModelMatcher.selection(forButtonTitle: AX.title(modelButton), among: models).modelID
+        AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        guard ModelSwitcher.waitUntil(timeout: 0.6, { CodexUI.composerHasFocus(composer, pid: pid) }),
+              AX.string(composer, kAXSelectedTextAttribute).isEmpty, CodexUI.modelMenu(near: composer) == nil else {
+            return .failed("Close the picker or clear the text selection first")
+        }
         func sameComposer() -> Bool {
             guard codex.isActive, !Keyboard.userInteracted(since: started),
-                  AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true else { return false }
+                  AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true,
+                  CodexUI.composerHasFocus(composer, pid: pid) else { return false }
             let current = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
             return current.identity.map { original.matches($0, equals: { CFEqual($0, $1) }) } == true
-                && current.composer.flatMap(CodexUI.composerText) == draft
+                && current.modelButton.map { CurrentModelMatcher.selection(forButtonTitle: AX.title($0), among: models).modelID } == modelID
         }
-
-        // A speed icon can be beside the model button, or inside its menu. Read only
-        // this composer's ancestors first; another split task must not supply it.
-        var control: AXUIElement?
-        for scope in located.scopeAncestors {
-            if let found = speedControl(in: scope) { control = found; break }
+        var typed = ""
+        func cleanup() -> Bool {
+            guard sameComposer() else { return false }
+            let state = ComposerText.cleanupState(typed, before: draft, after: CodexUI.composerText(composer))
+            if state == .remaining {
+                for _ in typed {
+                    guard sameComposer(), Keyboard.pressUnlessTyping(Keyboard.backspace, pid: pid) else { return false }
+                }
+            } else if state != .restored { return false }
+            guard ModelSwitcher.waitUntil(timeout: 0.8, { CodexUI.composerText(composer) == draft }) else { return false }
+            typed = ""
+            return true
         }
-        var openedModelMenu = false
-        var openedSpeedMenu = false
-
-        func dismissOwnedMenus() {
-            // Escape is sent only while our own menu is still visible. An extra
-            // Escape after it closes could dismiss an unrelated Codex panel.
-            if openedSpeedMenu, sameComposer(), !speedOptions(in: root).isEmpty {
-                _ = Keyboard.pressUnlessTyping(Keyboard.escape, pid: pid)
-                _ = ModelSwitcher.waitUntil(timeout: 0.6) { speedOptions(in: root).isEmpty }
+        defer { _ = cleanup() } // A failed command lookup can leave our query in the draft; remove only the exact insertion we can prove.
+        func inspect(_ query: String) -> [ResponseSpeed: (AXUIElement, SpeedCommandState)]? {
+            guard sameComposer(), cleanup(), CodexUI.composerText(composer) == draft else { return nil }
+            for character in query {
+                guard sameComposer(), Keyboard.typeUnlessTyping(character, pid: pid) else { return nil }
+                typed.append(character)
+                usleep(8_000)
             }
-            if openedModelMenu, sameComposer(), speedControl(in: root) != nil {
-                _ = Keyboard.pressUnlessTyping(Keyboard.escape, pid: pid)
-            }
-        }
-        defer {
-            dismissOwnedMenus()
-            // Codex's speed menu returns focus to its trigger. Restore the caret
-            // only if this same input owned it before our click and the user stayed.
-            if restoreComposerFocus, sameComposer(), speedOptions(in: root).isEmpty,
-               let input = CodexUI.Cache.current(window: window, models: models, forceRefresh: true).composer {
-                AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            return ModelSwitcher.poll(timeout: 1.5) {
+                guard sameComposer(), ComposerText.cleanupState(query, before: draft, after: CodexUI.composerText(composer)) == .remaining else { return nil }
+                return CodexUI.speedCommands(near: composer)
             }
         }
-
-        if control == nil {
-            guard speedControl(in: root) == nil, speedOptions(in: root).isEmpty else {
-                return .failed("Close the Codex picker, then choose a speed")
-            }
-            guard sameComposer(), AX.press(modelButton) else { return .failed("Could not open Codex's speed choices") }
-            openedModelMenu = true
-            control = ModelSwitcher.poll(timeout: 1.5) { sameComposer() ? speedControl(in: root) : nil }
+        guard let commands = inspect("/") else { return .failed("Speed commands are unavailable in this composer") }
+        let enabled = commands.filter { $0.value.1 == .enabled }.map(\.key)
+        guard enabled.count <= 1 else { return .failed("Codex's current speed is ambiguous") }
+        let current = enabled.first ?? .standard
+        let target: ResponseSpeed
+        switch request {
+        case .select(let speed): target = speed
+        case .increase: target = current.stepped(up: true, available: Set(commands.keys))
+        case .decrease: target = current.stepped(up: false, available: Set(commands.keys))
         }
-        guard let control else { return .failed("Speed choices are unavailable for this model") }
-        guard sameComposer() else { return .cancelledForTyping }
-        Log.info("speed-switch phase=control speed=\(ResponseSpeed.controlValue(title: AX.title(control))?.rawValue ?? "unknown") role=\(AX.role(control)) modelMenu=\(openedModelMenu)")
-        if ResponseSpeed.controlValue(title: AX.title(control)) == target { return .changed }
-        guard sameComposer(), AX.press(control) else { return .failed("Could not open Codex's speed choices") }
-        openedSpeedMenu = true
-        guard let options = ModelSwitcher.poll(timeout: 1.5, {
-            sameComposer() && !speedOptions(in: root).isEmpty ? speedOptions(in: root) : nil
-        }) else { return .failed("Codex did not open its speed choices") }
-        let matches = options.filter { ResponseSpeed.menuValue(title: AX.title($0)) == target }
-        Log.info("speed-switch phase=options available=[\(options.compactMap { ResponseSpeed.menuValue(title: AX.title($0))?.rawValue }.sorted().joined(separator: ","))]")
-        guard matches.count == 1, let option = matches.first,
-              (AX.attribute(option, kAXEnabledAttribute) as Bool?) == true else {
-            return .failed("\(target.rawValue) is unavailable for this model")
+        if current == target {
+            return cleanup() ? .changed(target) : .failed("Could not restore the draft after checking speed")
         }
-        guard sameComposer(), AX.press(option) else { return .failed("Could not select \(target.rawValue) speed") }
-
-        // Compact controls stay on screen; the advanced picker may close on selection.
-        // Reopen only the same composer's picker when its speed row disappeared.
-        _ = ModelSwitcher.waitUntil(timeout: 0.6) { speedOptions(in: root).isEmpty }
-        if speedControl(in: root) == nil, openedModelMenu, sameComposer() {
-            guard AX.press(modelButton) else { return .failed("Could not confirm \(target.rawValue) speed") }
+        let commandSpeed = target == .standard ? current : target // Standard turns the currently active slash toggle off; there is no /standard command.
+        guard commands[commandSpeed] != nil else { return .failed("\(target.rawValue) is unavailable for this model") }
+        let query = "/\(commandSpeed.rawValue.lowercased())"
+        let expected: SpeedCommandState = target == .standard ? .enabled : .disabled
+        guard let filtered = inspect(query), filtered.count == 1, filtered[commandSpeed]?.1 == expected else {
+            return .failed("Could not isolate \(query) in Codex's command menu")
         }
-        let confirmed = ModelSwitcher.waitUntil(timeout: 1.5) {
-            sameComposer() && speedControl(in: root).map { ResponseSpeed.controlValue(title: AX.title($0)) == target } == true
+        usleep(37_500)
+        guard sameComposer(), ComposerText.cleanupState(query, before: draft, after: CodexUI.composerText(composer)) == .remaining,
+              let finalCommands = CodexUI.speedCommands(near: composer), finalCommands.count == 1,
+              finalCommands[commandSpeed]?.1 == expected, Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
+            return .failed("Speed command changed before selection")
         }
-        return confirmed ? .changed : .failed("Could not confirm \(target.rawValue) speed")
-    }
-
-    private static func webArea(containing element: AXUIElement) -> AXUIElement? {
-        var node = AX.parent(element)
-        for _ in 0..<60 {
-            guard let current = node else { return nil }
-            if AX.role(current) == "AXWebArea" { return current }
-            node = AX.parent(current)
+        guard ModelSwitcher.waitUntil(timeout: 1.5, { CodexUI.composerText(composer) == draft }),
+              let confirmed = inspect(query), confirmed.count == 1,
+              confirmed[commandSpeed]?.1 == (target == .standard ? .disabled : .enabled), cleanup() else {
+            return .failed("Could not confirm \(target.rawValue) speed")
         }
-        return nil
-    }
-
-    private static func speedControl(in root: AXUIElement) -> AXUIElement? {
-        let matches = controls(in: root) { ResponseSpeed.controlValue(title: AX.title($0)) != nil }
-        return matches.count == 1 ? matches.first : nil
-    }
-
-    private static func speedOptions(in root: AXUIElement) -> [AXUIElement] {
-        let matches = controls(in: root) { ResponseSpeed.menuValue(title: AX.title($0)) != nil }
-        // A complete speed menu always offers Standard. Reject stray Fast buttons
-        // elsewhere in the chat, including embedded Computer Use previews.
-        return matches.contains { ResponseSpeed.menuValue(title: AX.title($0)) == .standard } ? matches : []
-    }
-
-    private static func controls(in root: AXUIElement, matching predicate: (AXUIElement) -> Bool) -> [AXUIElement] {
-        var stack = AX.children(root), found: [AXUIElement] = [], visited = 0
-        while let node = stack.popLast() {
-            visited += 1
-            guard visited <= 30_000 else { return [] }
-            if AX.role(node) == "AXWebArea" { continue }
-            if [kAXButtonRole as String, kAXPopUpButtonRole as String, kAXMenuItemRole as String].contains(AX.role(node)),
-               predicate(node) { found.append(node) }
-            stack.append(contentsOf: AX.children(node))
-        }
-        return found
+        return .changed(target)
     }
 }

@@ -12,11 +12,20 @@ final class MouseShortcutTests: XCTestCase {
     }
 
     func testToggleDescriptionDistinguishesEnableFromDisable() {
-        XCTAssertEqual(UltrafastCommandState.read(title: "Ultrafast Turn off Ultrafast and return to standard speed"), .enabled)
-        XCTAssertEqual(UltrafastCommandState.read(title: "/ultrafast The fastest available responses for latency-sensitive work"), .disabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "Ultrafast Turn off Ultrafast and return to standard speed", speed: .ultrafast), .enabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "/ultrafast The fastest available responses for latency-sensitive work", speed: .ultrafast), .disabled)
         for text in ["Ultrafast", "Enable fast mode", "Fast Turn off Fast and return to standard speed",
                      "Chat about Ultrafast The fastest available responses for latency-sensitive work"] {
-            XCTAssertNil(UltrafastCommandState.read(title: text), text)
+            XCTAssertNil(SpeedCommandState.read(title: text, speed: .ultrafast), text)
+        }
+    }
+
+    func testSpeedRatchetURLsAcceptOnlyFixedPayloadFreeActions() throws {
+        for (name, expected) in [("speed-up", MouseShortcut.Action.speedUp), ("speed-down", .speedDown)] {
+            XCTAssertEqual(MouseShortcut.action(for: try XCTUnwrap(URL(string: "codex-model-bar://\(name)"))), expected)
+            for extra in ["/extra", "?speed=fast", "#text", ":123"] {
+                XCTAssertNil(MouseShortcut.action(for: try XCTUnwrap(URL(string: "codex-model-bar://\(name)\(extra)"))))
+            }
         }
     }
 }

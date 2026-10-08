@@ -132,24 +132,30 @@ final class AppController: NSObject, NSApplicationDelegate {
     // MARK: - Switching
 
     private func changeSpeed(to speed: ResponseSpeed) {
+        changeSpeed(.select(speed))
+    }
+
+    private func changeSpeed(_ request: SpeedSwitcher.Request) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
-        barView.setBusySpeed(speed)
+        barView.setBusySpeed(true)
         barView.showStatus(nil)
         watcher.setSuspended(true)
-        speedSwitcher.setSpeed(speed, allModels: allModels, codex: codex) { [weak self] result in
+        speedSwitcher.change(request, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .changed:
+            case .changed(let speed):
                 self.barView.showStatus("Speed: \(speed.rawValue)")
             case .cancelledForTyping:
                 self.barView.showStatus("Speed change cancelled while typing", color: .systemOrange)
             case .failed(let reason):
                 self.barView.showStatus(reason, color: .systemOrange)
             }
-            self.barView.setBusySpeed(nil)
-            self.watcher.setSuspended(false)
-            self.watcher.refreshSoon()
+            if !self.speedSwitcher.isBusy {
+                self.barView.setBusySpeed(false)
+                self.watcher.setSuspended(false)
+                self.watcher.refreshSoon()
+            }
         }
     }
 
@@ -181,7 +187,16 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard urls.count == 1, let url = urls.first, MouseShortcut.isAstraUltrafast(url) else { return }
+        guard urls.count == 1, let url = urls.first, let action = MouseShortcut.action(for: url) else { return }
+        switch action {
+        case .speedUp:
+            changeSpeed(.increase)
+            return
+        case .speedDown:
+            changeSpeed(.decrease)
+            return
+        case .astraUltrafast: break
+        }
         guard let model = allModels.first(where: { $0.id == MouseShortcut.astraModelID }) else {
             barView.showStatus("GPT-6 Astra is unavailable", color: .systemOrange)
             return

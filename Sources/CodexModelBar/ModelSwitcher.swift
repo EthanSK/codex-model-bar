@@ -293,7 +293,7 @@ final class ModelSwitcher {
                 && current.modelButton.map { CurrentModelMatcher.selection(forButtonTitle: AX.title($0), among: models).modelID } == selection.modelID
         }
         let query = "/ultrafast"
-        func inspectCommand() -> (AXUIElement, UltrafastCommandState)? {
+        func inspectCommand() -> (AXUIElement, SpeedCommandState)? {
             guard sameComposer(), CodexUI.composerText(composer) == before else { return nil }
             var typed = ""
             for character in query {

@@ -72,7 +72,7 @@ final class BarView: NSVisualEffectView {
     private var dragWasInvalidated = false
     private var busyReasoning = false
     private var busyModelID: String?
-    private var busySpeed: ResponseSpeed?
+    private var busySpeed = false
     private var statusHideWork: DispatchWorkItem?
 
     var currentModelIdentifier: String? { currentModelID }
@@ -91,13 +91,7 @@ final class BarView: NSVisualEffectView {
         speedSeparator.boxType = .separator
         addSubview(speedSeparator)
         for speed in ResponseSpeed.allCases {
-            let symbol: String
-            switch speed {
-            case .standard: symbol = "speedometer"
-            case .fast: symbol = "bolt"
-            case .ultrafast: symbol = "bolt.fill"
-            }
-            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: speed.rawValue)!,
+            let button = NSButton(image: Self.speedImage(for: speed),
                                   target: self, action: #selector(speedClicked(_:)))
             button.isBordered = false
             button.imagePosition = .imageOnly
@@ -274,8 +268,8 @@ final class BarView: NSVisualEffectView {
         refreshReasoningControl()
     }
 
-    func setBusySpeed(_ speed: ResponseSpeed?) {
-        busySpeed = speed
+    func setBusySpeed(_ busy: Bool) {
+        busySpeed = busy
         refreshButtonStates()
         refreshReasoningControl()
     }
@@ -289,11 +283,11 @@ final class BarView: NSVisualEffectView {
     private func refreshButtonStates() {
         for (id, button) in buttons {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
-            button.isEnabled = busyModelID == nil && !busyReasoning && busySpeed == nil
+            button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
         }
-        for (speed, button) in speedButtons {
-            button.isEnabled = busyModelID == nil && !busyReasoning && busySpeed == nil
-            button.contentTintColor = busySpeed == speed ? .controlAccentColor : .labelColor
+        for button in speedButtons.values {
+            button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
+            button.contentTintColor = .labelColor
         }
     }
 
@@ -309,7 +303,7 @@ final class BarView: NSVisualEffectView {
         if !reasoningSlider.isTrackingPointer && !busyReasoning {
             reasoningSlider.doubleValue = Double(index ?? 0)
         }
-        reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning && busySpeed == nil
+        reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning && !busySpeed
         updateReasoningLabel()
     }
 
@@ -354,6 +348,22 @@ final class BarView: NSVisualEffectView {
     @objc private func speedClicked(_ sender: NSButton) {
         guard let speed = speedButtons.first(where: { $0.value === sender })?.key else { return }
         onSelectSpeed?(speed)
+    }
+
+    private static func speedImage(for speed: ResponseSpeed) -> NSImage {
+        switch speed {
+        case .standard: return NSImage(systemSymbolName: "speedometer", accessibilityDescription: speed.rawValue)!
+        case .fast: return NSImage(systemSymbolName: "bolt", accessibilityDescription: speed.rawValue)!
+        case .ultrafast:
+            let bolt = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)!
+            let image = NSImage(size: NSSize(width: 20, height: 16), flipped: false) { _ in
+                bolt.draw(in: NSRect(x: 1, y: 1, width: 8, height: 14))
+                bolt.draw(in: NSRect(x: 11, y: 1, width: 8, height: 14))
+                return true
+            }
+            image.isTemplate = true
+            return image
+        }
     }
 
     @objc private func effortClicked(_ sender: ReasoningSlider) {

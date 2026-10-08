@@ -2,25 +2,33 @@ import XCTest
 @testable import CodexModelBarCore
 
 final class ResponseSpeedTests: XCTestCase {
-    func testNativeSpeedChoicesAndCurrentTier() {
-        XCTAssertEqual(ResponseSpeed.controlValue(title: "Speed Standard"), .standard)
-        XCTAssertEqual(ResponseSpeed.controlValue(title: "Speed Fast"), .fast)
-        XCTAssertEqual(ResponseSpeed.controlValue(title: "Speed Ultrafast"), .ultrafast)
-        XCTAssertEqual(ResponseSpeed.menuValue(title: "Standard Default speed"), .standard)
-        XCTAssertEqual(ResponseSpeed.menuValue(title: "Fast 1.5x speed, more usage"), .fast)
-        XCTAssertEqual(ResponseSpeed.menuValue(title: "Fast 2x speed, more usage"), .fast)
-        XCTAssertEqual(ResponseSpeed.menuValue(title: "Ultrafast The fastest available responses for latency-sensitive work"), .ultrafast)
-        for speed in ResponseSpeed.allCases {
-            XCTAssertEqual(ResponseSpeed.menuValue(title: speed.rawValue), speed)
+    func testExactSlashDescriptionsDistinguishCurrentTier() {
+        XCTAssertEqual(SpeedCommandState.read(title: "Fast 1.5x speed, increased usage", speed: .fast), .disabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "/fast 2x speed, increased usage", speed: .fast), .disabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "Fast Turn off Fast and return to standard speed", speed: .fast), .enabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "Ultrafast The fastest available responses for latency-sensitive work", speed: .ultrafast), .disabled)
+        XCTAssertEqual(SpeedCommandState.read(title: "Ultrafast Turn off Ultrafast and return to standard speed", speed: .ultrafast), .enabled)
+        XCTAssertNil(SpeedCommandState.read(title: "Standard Default speed", speed: .standard))
+    }
+
+    func testOtherControlsCannotSupplyACommandState() {
+        for title in ["Fast", "Speed Fast", "Fast model", "Fast nanx speed, increased usage", "Fast -1x speed, increased usage",
+                      "Chat about Fast Turn off Fast and return to standard speed", "Fast Turn off Ultrafast and return to standard speed",
+                      "Fast Turn off Fast and return to standard speed extra"] {
+            XCTAssertNil(SpeedCommandState.read(title: title, speed: .fast), title)
         }
     }
 
-    func testOtherControlsAndToggleCommandsCannotSelectASpeed() {
-        for title in ["GPT-6 Astra High Ultrafast", "Fast model", "Standard project",
-                      "Ultrafast Turn off Ultrafast and return to Standard speed", "/fast", "Speed", "Speed Turbo",
-                      "Fast nanx speed, more usage", "Fast -1x speed, more usage"] {
-            XCTAssertNil(ResponseSpeed.controlValue(title: title), title)
-            XCTAssertNil(ResponseSpeed.menuValue(title: title), title)
-        }
+    func testWheelStepsDoNotWrapAndRespectAvailableSpeeds() {
+        let all: Set<ResponseSpeed> = [.fast, .ultrafast]
+        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: all), .fast)
+        XCTAssertEqual(ResponseSpeed.fast.stepped(up: true, available: all), .ultrafast)
+        XCTAssertEqual(ResponseSpeed.ultrafast.stepped(up: true, available: all), .ultrafast)
+        XCTAssertEqual(ResponseSpeed.ultrafast.stepped(up: false, available: all), .fast)
+        XCTAssertEqual(ResponseSpeed.fast.stepped(up: false, available: all), .standard)
+        XCTAssertEqual(ResponseSpeed.standard.stepped(up: false, available: all), .standard)
+        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: [.ultrafast]), .ultrafast)
+        XCTAssertEqual(ResponseSpeed.fast.stepped(up: true, available: [.fast]), .fast)
+        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: []), .standard)
     }
 }

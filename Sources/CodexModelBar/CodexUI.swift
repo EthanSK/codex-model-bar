@@ -181,7 +181,11 @@ enum CodexUI {
     static let recentHeader = "Recent models"
     static let matchingHeader = "Matching models"
 
-    static func ultrafastCommand(near composer: AXUIElement) -> (AXUIElement, UltrafastCommandState)? {
+    static func ultrafastCommand(near composer: AXUIElement) -> (AXUIElement, SpeedCommandState)? {
+        speedCommands(near: composer)?[.ultrafast]
+    }
+
+    static func speedCommands(near composer: AXUIElement) -> [ResponseSpeed: (AXUIElement, SpeedCommandState)]? {
         // Follow only this composer's nearest web area; an embedded browser or
         // another window cannot supply the command. Ordinary speed controls lack
         // the slash command's full description and never satisfy this predicate.
@@ -192,20 +196,24 @@ enum CodexUI {
             steps += 1
         }
         guard let root = ancestor, AX.role(root) == "AXWebArea" else { return nil }
-        var stack = AX.children(root), matches: [(AXUIElement, UltrafastCommandState)] = []
+        var stack = AX.children(root), matches: [ResponseSpeed: (AXUIElement, SpeedCommandState)] = [:]
         var count = 0
         while let node = stack.popLast() {
             count += 1
             guard count <= 30_000 else { return nil }
             if AX.role(node) == "AXWebArea" { continue }
             if AX.role(node) == kAXButtonRole as String,
-               let state = UltrafastCommandState.read(title: AX.title(node)),
                (AX.attribute(node, kAXEnabledAttribute) as Bool?) == true {
-                matches.append((node, state))
+                for speed in [ResponseSpeed.fast, .ultrafast] {
+                    if let state = SpeedCommandState.read(title: AX.title(node), speed: speed) {
+                        guard matches[speed] == nil else { return nil }
+                        matches[speed] = (node, state)
+                    }
+                }
             }
             stack.append(contentsOf: AX.children(node))
         }
-        return matches.count == 1 ? matches.first : nil
+        return matches.isEmpty ? nil : matches
     }
 
     /// The typing menu may be a portal anywhere in this composer's web area.
