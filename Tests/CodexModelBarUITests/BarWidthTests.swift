@@ -21,6 +21,19 @@ final class BarWidthTests: XCTestCase {
                 bar.showStatus(status)
                 bar.layoutSubtreeIfNeeded()
                 let buttons = descendants(bar).compactMap { $0 as? ModelButton }
+                let speeds = descendants(bar).compactMap { $0 as? NSButton }.filter {
+                    $0.accessibilityLabel()?.hasSuffix(" speed") == true
+                }
+                XCTAssertEqual(speeds.count, 3)
+                for button in speeds {
+                    let rect = bar.convert(button.bounds, from: button)
+                    XCTAssertEqual(rect.width, 24)
+                    XCTAssertGreaterThanOrEqual(rect.minX, 0)
+                    XCTAssertLessThanOrEqual(rect.maxX, width)
+                    for modelButton in buttons {
+                        XCTAssertFalse(rect.intersects(bar.convert(modelButton.bounds, from: modelButton)))
+                    }
+                }
                 XCTAssertEqual(buttons.count, models.count, "Detached buttons at width \(width)")
                 for button in buttons {
                     let rect = bar.convert(button.bounds, from: button)
@@ -31,6 +44,27 @@ final class BarWidthTests: XCTestCase {
                 XCTAssertEqual(bar.preferredWidth, naturalWidth, accuracy: 0.5)
             }
         }
+    }
+
+    func testSpeedIconsSelectExplicitChoicesAndBusyBlocksOtherActions() {
+        let bar = BarView(frame: NSRect(x: 0, y: 0, width: 800, height: BarView.height))
+        bar.setModels([CodexModel(id: "sol", displayName: "Sol")])
+        var selected: [ResponseSpeed] = []
+        bar.onSelectSpeed = { selected.append($0) }
+        let speeds = bar.subviews.compactMap { $0 as? NSButton }.filter {
+            $0.accessibilityLabel()?.hasSuffix(" speed") == true
+        }
+        for speed in ResponseSpeed.allCases {
+            let button = speeds.first { $0.accessibilityLabel() == "\(speed.rawValue) speed" }!
+            button.performClick(nil)
+            button.performClick(nil)
+        }
+        XCTAssertEqual(selected, [.standard, .standard, .fast, .fast, .ultrafast, .ultrafast])
+        bar.setBusySpeed(.fast)
+        XCTAssertTrue(speeds.allSatisfy { !$0.isEnabled })
+        XCTAssertTrue(bar.subviews.compactMap { $0 as? ModelButton }.allSatisfy { !$0.isEnabled })
+        bar.setBusySpeed(nil)
+        XCTAssertTrue(speeds.allSatisfy(\.isEnabled))
     }
 
     func testModelAndReasoningChangesKeepPreferredWidth() {

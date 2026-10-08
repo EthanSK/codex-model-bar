@@ -43,6 +43,8 @@ final class BarView: NSVisualEffectView {
     var onSelect: ((CodexModel) -> Void)?
     /// Called when a reasoning tick is chosen.
     var onSelectEffort: ((String) -> Void)?
+    /// Called when a response-speed icon is clicked.
+    var onSelectSpeed: ((ResponseSpeed) -> Void)?
     /// Called when the status text is clicked (used for "Allow Accessibility access").
     var onStatusClick: (() -> Void)?
     /// Repositions the panel when the visible model list changes its required width.
@@ -57,6 +59,8 @@ final class BarView: NSVisualEffectView {
     private let reasoningLabel = NSTextField(labelWithString: "Reasoning —")
     private let reasoningSlider = ReasoningSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let separator = NSBox()
+    private let speedSeparator = NSBox()
+    private var speedButtons: [ResponseSpeed: NSButton] = [:]
     private let statusButton = NSButton(title: "", target: nil, action: nil)
     private var buttons: [String: ModelButton] = [:]
     private var models: [CodexModel] = []
@@ -68,6 +72,7 @@ final class BarView: NSVisualEffectView {
     private var dragWasInvalidated = false
     private var busyReasoning = false
     private var busyModelID: String?
+    private var busySpeed: ResponseSpeed?
     private var statusHideWork: DispatchWorkItem?
 
     var currentModelIdentifier: String? { currentModelID }
@@ -83,6 +88,25 @@ final class BarView: NSVisualEffectView {
 
         separator.boxType = .separator
         addSubview(separator)
+        speedSeparator.boxType = .separator
+        addSubview(speedSeparator)
+        for speed in ResponseSpeed.allCases {
+            let symbol: String
+            switch speed {
+            case .standard: symbol = "speedometer"
+            case .fast: symbol = "bolt"
+            case .ultrafast: symbol = "bolt.fill"
+            }
+            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: speed.rawValue)!,
+                                  target: self, action: #selector(speedClicked(_:)))
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.toolTip = speed == .fast ? "Fast speed — more usage" : "\(speed.rawValue) speed"
+            button.setAccessibilityLabel("\(speed.rawValue) speed")
+            addSubview(button)
+            speedButtons[speed] = button
+        }
 
         reasoningLabel.font = .systemFont(ofSize: 11, weight: .medium)
         reasoningLabel.textColor = .secondaryLabelColor
@@ -144,7 +168,7 @@ final class BarView: NSVisualEffectView {
     /// width back into the panel, and status messages use the reasoning area.
     var preferredWidth: CGFloat {
         modelWidths.reduce(0, +) + CGFloat(max(models.count - 1, 0)) * modelSpacing
-            + sectionSpacing + naturalReasoningWidth + 16
+            + sectionSpacing + naturalReasoningWidth + speedWidth + 16
     }
 
     private var modelWidths: [CGFloat] {
@@ -155,9 +179,11 @@ final class BarView: NSVisualEffectView {
         1 + sectionSpacing + reasoningLabelWidth + sectionSpacing + sliderWidth
     }
 
+    private var speedWidth: CGFloat { sectionSpacing * 2 + 1 + 3 * 24 }
+
     override func layout() {
         super.layout()
-        let available = max(0, bounds.width - 16)
+        let available = max(0, bounds.width - 16 - speedWidth)
         let reasoningWidth = min(naturalReasoningWidth, max(150, available * 0.45))
         let gaps = CGFloat(max(models.count - 1, 0)) * modelSpacing
         let buttonSpace = max(0, available - reasoningWidth - sectionSpacing - gaps)
@@ -174,7 +200,7 @@ final class BarView: NSVisualEffectView {
         x += sectionSpacing
         separator.frame = NSRect(x: x, y: (bounds.height - 17) / 2, width: 1, height: 17)
         x += 1 + sectionSpacing
-        let remaining = max(0, bounds.width - 8 - x)
+        let remaining = max(0, bounds.width - 8 - speedWidth - x)
         let labelWidth = min(reasoningLabelWidth, max(60, remaining - sectionSpacing - 70))
         reasoningLabel.frame = NSRect(x: x, y: (bounds.height - 16) / 2, width: labelWidth, height: 16)
         reasoningSlider.frame = NSRect(x: x + labelWidth + sectionSpacing, y: 2,
@@ -182,6 +208,12 @@ final class BarView: NSVisualEffectView {
         statusButton.frame = NSRect(x: x, y: 3, width: remaining, height: bounds.height - 6)
         reasoningLabel.isHidden = !statusButton.isHidden
         reasoningSlider.isHidden = !statusButton.isHidden
+        speedSeparator.frame = NSRect(x: bounds.width - 8 - speedWidth + sectionSpacing,
+                                      y: (bounds.height - 17) / 2, width: 1, height: 17)
+        for (index, speed) in ResponseSpeed.allCases.enumerated() {
+            speedButtons[speed]?.frame = NSRect(x: bounds.width - 8 - 72 + CGFloat(index * 24),
+                                               y: (bounds.height - 22) / 2, width: 24, height: 22)
+        }
     }
 
     // MARK: - Content
@@ -242,6 +274,12 @@ final class BarView: NSVisualEffectView {
         refreshReasoningControl()
     }
 
+    func setBusySpeed(_ speed: ResponseSpeed?) {
+        busySpeed = speed
+        refreshButtonStates()
+        refreshReasoningControl()
+    }
+
     func cancelReasoningPreview() {
         previewEffort = nil
         if reasoningSlider.isTrackingPointer { dragWasInvalidated = true }
@@ -251,7 +289,11 @@ final class BarView: NSVisualEffectView {
     private func refreshButtonStates() {
         for (id, button) in buttons {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
-            button.isEnabled = busyModelID == nil && !busyReasoning
+            button.isEnabled = busyModelID == nil && !busyReasoning && busySpeed == nil
+        }
+        for (speed, button) in speedButtons {
+            button.isEnabled = busyModelID == nil && !busyReasoning && busySpeed == nil
+            button.contentTintColor = busySpeed == speed ? .controlAccentColor : .labelColor
         }
     }
 
@@ -267,7 +309,7 @@ final class BarView: NSVisualEffectView {
         if !reasoningSlider.isTrackingPointer && !busyReasoning {
             reasoningSlider.doubleValue = Double(index ?? 0)
         }
-        reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning
+        reasoningSlider.isEnabled = efforts.count > 1 && index != nil && busyModelID == nil && !busyReasoning && busySpeed == nil
         updateReasoningLabel()
     }
 
@@ -307,6 +349,11 @@ final class BarView: NSVisualEffectView {
 
     @objc private func modelClicked(_ sender: ModelButton) {
         onSelect?(sender.model)
+    }
+
+    @objc private func speedClicked(_ sender: NSButton) {
+        guard let speed = speedButtons.first(where: { $0.value === sender })?.key else { return }
+        onSelectSpeed?(speed)
     }
 
     @objc private func effortClicked(_ sender: ReasoningSlider) {

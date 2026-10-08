@@ -1,6 +1,6 @@
 # Codex Model Bar
 
-**Models and reasoning, one click below Codex.** A 30-point macOS strip follows the active Codex desktop window. Its width fits the model buttons and reasoning control, and it highlights the model and effort used by the open task.
+**Models, reasoning and speed, one click below Codex.** A 30-point macOS strip follows the active Codex desktop window. Its width fits the model buttons, reasoning control and three speed icons, and it highlights the model and effort used by the open task.
 
 [Project page](https://ethansk.github.io/codex-model-bar/) · [Source](https://github.com/EthanSK/codex-model-bar) · [Claude in Codex](https://github.com/EthanSK/claude-in-codex)
 
@@ -34,6 +34,12 @@ The reasoning slider uses Codex's **Increase reasoning effort** and **Decrease r
 The buttons use model entries observed in Codex's shared cache. If you use [Claude in Codex](https://github.com/EthanSK/claude-in-codex), its Claude entries appear too. That cache can briefly omit models the desktop still offers, so refreshes preserve previously known entries and their button order. Updated names, reasoning levels and explicit hidden flags still apply. The saved list also survives a bar restart; hide an unwanted button from the right-click menu. Keeping a button does not guarantee account access: a switch still requires Codex's menu to offer the model. The bar can ask Codex's bundled `app-server` when the shared cache is unavailable, and you can refresh manually from the right-click menu.
 
 The switcher uses Codex's inline `/model` menu, with 37.5 ms settling pauses. It recognises the typing menu when Codex renders it separately from the message box, restricted to the focused composer’s own web area. To switch, the bar opens the menu with Control+Command+M, searches by model id, checks that every result names the target model, then presses Return. It confirms the changed model in Codex's composer. If a floating typing panel takes keyboard focus during a switch, the bar restores Codex's focus and retries once only when the same composer and its unchanged draft can be verified. It stops if you type or click, and removes only search text it can prove it added. Live switches on the current desktop have succeeded, but a switch interrupted by a panel during search still needs a live check.
+
+### Response speed
+
+The three icons at the right choose **Standard** (gauge), **Fast** (outline bolt), or **Ultrafast** (filled bolt). Hover for the name. They select an explicit choice in Codex's own Speed submenu, so clicking the same speed again keeps it selected. Fast uses more account usage. Codex decides which choices your current model and account support; the bar reports an unavailable choice rather than changing models or sending a message. It confirms the speed from Codex's accessible control and preserves the draft. The icons are action buttons, not a cached speed indicator.
+
+Speed parsing, layout and click dispatch have automated coverage. Manual layout and icon-dispatch checks use the production bar in an isolated native fixture; these do not prove live Codex submenu acceptance, which remains unverified where Computer Use blocks access to Codex. Native desktop updates can change the submenu's accessible names or actions.
 
 ## Limits and privacy
 

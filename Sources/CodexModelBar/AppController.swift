@@ -16,6 +16,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let watcher = CurrentModelWatcher()
     private let switcher = ModelSwitcher()
     private let reasoningSwitcher = ReasoningSwitcher()
+    private let speedSwitcher = SpeedSwitcher()
 
     /// Every model Codex offers (before the user's show/hide choices).
     private var allModels: [CodexModel] = []
@@ -29,6 +30,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
         barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
+        barView.onSelectSpeed = { [weak self] speed in self?.changeSpeed(to: speed) }
         barView.onStatusClick = { [weak self] in self?.statusClicked() }
         barView.onSizeChange = { [weak self] in
             guard let self else { return }
@@ -128,6 +130,28 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Switching
+
+    private func changeSpeed(to speed: ResponseSpeed) {
+        guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
+        guard let codex = tracker.codexApp else { return }
+        barView.setBusySpeed(speed)
+        barView.showStatus(nil)
+        watcher.setSuspended(true)
+        speedSwitcher.setSpeed(speed, allModels: allModels, codex: codex) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .changed:
+                self.barView.showStatus("Speed: \(speed.rawValue)")
+            case .cancelledForTyping:
+                self.barView.showStatus("Speed change cancelled while typing", color: .systemOrange)
+            case .failed(let reason):
+                self.barView.showStatus(reason, color: .systemOrange)
+            }
+            self.barView.setBusySpeed(nil)
+            self.watcher.setSuspended(false)
+            self.watcher.refreshSoon()
+        }
+    }
 
     private func changeEffort(to effort: String) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
