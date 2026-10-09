@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.25: live Ultrafast metadata includes sentence punctuation
+
+The October 9 installed log showed Fast and Standard working while Ultrafast failed with `Could not isolate /ultrafast in Codex's command menu`. The live Sol 6.1 and Astra model cache supplies `The fastest available responses for latency-sensitive work.` with a final period; Codex's bundled default omits that period. The exact command matcher accepted only the latter, causing the failed attempt to remove its own query before Return. Accept these two exact descriptions and continue rejecting bare labels, trailing unrelated text and malformed descriptions. The regression failed against 1.2.24 before the fix.
+
+Speed changes have no unconditional settling sleeps. Keep the original focused input and paired model control throughout the action, and re-read the identified command before Return; do not repeat full-window composer scans or rediscover the same command after every query. Polling is readiness-driven and checks immediately, with a 40 ms interval only after a read is not ready. A detached input, changed model, hardware interaction, unreadable draft or changed command still cancels; do not send blind Return as a timing workaround. These checks and the signed build do not prove a live Codex command was accepted.
+
 ## 1.2.21: Astra and Ultrafast use one composer-owned journey
 
 The installed Codex renderer registers speed slash commands dynamically as `service-tier:<id>`. Selecting the already selected tier sets null and returns to Standard; the keyboard fast-mode command cycles available tiers. Neither is an unconditional enable action. Inspect the exact Ultrafast command description, choose only its disabled state, and re-inspect the enabled description without selecting it again. Keep the same composer identity, model, window and draft across the two steps; refuse to type over a selection or press Return without the exact enabled command entry. The fixed companion URL accepts no arbitrary model or text. Automated checks and installation do not establish live Codex acceptance; Computer Use refuses the Codex bundle in this environment.

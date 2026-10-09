@@ -29,7 +29,8 @@ public enum SpeedCommandState: Equatable {
                   multiplier.isFinite, multiplier > 0 else { return nil }
             return .disabled
         case .ultrafast:
-            return description == "the fastest available responses for latency-sensitive work" ? .disabled : nil
+            let expected = "the fastest available responses for latency-sensitive work"
+            return description == expected || description == expected + "." ? .disabled : nil // Live model metadata adds a period; the renderer's default description omits it.
         }
     }
 }

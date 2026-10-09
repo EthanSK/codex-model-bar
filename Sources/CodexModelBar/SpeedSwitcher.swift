@@ -69,8 +69,8 @@ final class SpeedSwitcher {
         AX.enableWebAccessibility(pid: pid)
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("No Codex window") }
         let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
-        guard let composer = located.composer, let original = located.identity,
-              let modelButton = located.modelButton, let draft = CodexUI.composerText(composer) else {
+        guard let composer = located.composer, let modelButton = located.modelButton,
+              let draft = CodexUI.composerText(composer) else {
             return .failed("No task composer")
         }
         let modelID = CurrentModelMatcher.selection(forButtonTitle: AX.title(modelButton), among: models).modelID
@@ -85,10 +85,8 @@ final class SpeedSwitcher {
                 && CodexUI.composerHasFocus(composer, pid: pid)
         }
         func sameComposer() -> Bool {
-            guard sameFocus() else { return false }
-            let current = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
-            return current.identity.map { original.matches($0, equals: { CFEqual($0, $1) }) } == true
-                && current.modelButton.map { CurrentModelMatcher.selection(forButtonTitle: AX.title($0), among: models).modelID } == modelID
+            sameFocus() && AX.role(modelButton) == kAXPopUpButtonRole as String
+                && CurrentModelMatcher.selection(forButtonTitle: AX.title(modelButton), among: models).modelID == modelID // Speed commands keep the original input; re-read its live controls instead of walking the whole window again.
         }
         var inserted = ""
         func cleanup() -> Bool {
@@ -138,7 +136,7 @@ final class SpeedSwitcher {
             } else { commandSpeed = speed }
         }
         let query = "/\(commandSpeed.rawValue.lowercased())"
-        guard let commands = inspect(query), commands.count == 1, let state = commands[commandSpeed]?.1 else {
+        guard let commands = inspect(query), commands.count == 1, let (command, state) = commands[commandSpeed] else {
             return isCurrent() ? .failed("Could not isolate \(query) in Codex's command menu") : .cancelled
         }
         if let target, (target == .standard) == (state == .disabled) {
@@ -146,8 +144,8 @@ final class SpeedSwitcher {
         }
         guard isCurrent(), sameComposer(),
               ComposerText.cleanupState(query, before: draft, after: CodexUI.composerText(composer)) == .remaining,
-              let finalCommands = CodexUI.speedCommands(near: composer), finalCommands.count == 1,
-              finalCommands[commandSpeed]?.1 == state, sameFocus(), isCurrent(),
+              (AX.attribute(command, kAXEnabledAttribute) as Bool?) == true,
+              SpeedCommandState.read(title: AX.title(command), speed: commandSpeed) == state, sameFocus(), isCurrent(), // Revalidate the exact menu entry just found; a second full-tree scan adds latency without selecting anything else.
               Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
             return isCurrent() ? .failed("Speed command changed before selection") : .cancelled
         }

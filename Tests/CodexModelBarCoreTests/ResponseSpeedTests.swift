@@ -18,4 +18,20 @@ final class ResponseSpeedTests: XCTestCase {
             XCTAssertNil(SpeedCommandState.read(title: title, speed: .fast), title)
         }
     }
+
+    func testLiveUltrafastDescriptionWithFinalPeriodIsRecognized() {
+        for prefix in ["Ultrafast", "/ultrafast"] {
+            XCTAssertEqual(SpeedCommandState.read(
+                title: "\(prefix) The fastest available responses for latency-sensitive work.",
+                speed: .ultrafast), .disabled)
+        }
+    }
+
+    func testUltrafastStillRequiresTheWholeCommandDescription() {
+        for title in ["Ultrafast", "Ultrafast model", "Ultrafast The fastest available responses for latency-sensitive work. extra",
+                      "Ultrafast The fastest available responses for latency-sensitive work..",
+                      "Ultrafast Turn off Fast and return to standard speed"] {
+            XCTAssertNil(SpeedCommandState.read(title: title, speed: .ultrafast), title)
+        }
+    }
 }
