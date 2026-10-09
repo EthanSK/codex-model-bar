@@ -34,4 +34,20 @@ final class ResponseSpeedTests: XCTestCase {
             XCTAssertNil(SpeedCommandState.read(title: title, speed: .ultrafast), title)
         }
     }
+
+    func testOnlyFastAndUltrafastHaveSlashCommands() {
+        XCTAssertNil(ResponseSpeed.standard.command)
+        XCTAssertEqual(ResponseSpeed.fast.command, "/fast")
+        XCTAssertEqual(ResponseSpeed.ultrafast.command, "/ultrafast")
+    }
+
+    // Replays the 2026-10-09 message box that still held "/fast/fast" after two Fast pastes.
+    func testBackgroundCheckFindsASpeedCommandLeftAtTheEnd() {
+        XCTAssertEqual(ResponseSpeed.unsentCommand(in: "/fast/fast"), "/fast")
+        XCTAssertEqual(ResponseSpeed.unsentCommand(in: "/ultrafast"), "/ultrafast")
+        XCTAssertEqual(ResponseSpeed.unsentCommand(in: "draft /fast"), "/fast")
+        for draft in ["", "draft", "/fast draft", "/fastest", "/standard"] {
+            XCTAssertNil(ResponseSpeed.unsentCommand(in: draft), draft)
+        }
+    }
 }

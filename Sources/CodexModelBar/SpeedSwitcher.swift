@@ -71,8 +71,7 @@ final class SpeedSwitcher {
         switch request {
         case .select(let selected), .command(let selected): speed = selected
         }
-        if speed != .standard {
-            let command = "/\(speed.rawValue.lowercased())"
+        if let command = speed.command {
             guard SpeedCommandPaste.post(command, canPost: { isCurrent() && codex.isActive }) else {
                 return isCurrent() ? .failed("Speed commands are unavailable in this composer") : .cancelled
             }
@@ -132,10 +131,18 @@ final class SpeedSwitcher {
         guard let current = enabled.first else {
             return cleanup() ? .changed(.standard) : .failed("Could not restore the draft after checking speed")
         }
-        guard cleanup(), isCurrent(), sameFocus(),
-              SpeedCommandPaste.post("/\(current.rawValue.lowercased())", canPost: { isCurrent() && codex.isActive }) else {
+        guard cleanup(), isCurrent(), sameFocus(), let command = current.command,
+              SpeedCommandPaste.post(command, canPost: { isCurrent() && codex.isActive }) else {
             return isCurrent() ? .failed("Speed command changed before selection") : .cancelled
         }
         return .requested(.standard) // Codex has no /standard command, so only this button reads the active toggle once; the actual paste/Return is never retyped to verify it.
+    }
+
+    /// Reads the focused message box once for a speed command that Return left unsent.
+    /// Call on `AX.queue` after the switch has finished.
+    static func unsentCommand(pid: pid_t) -> String? {
+        guard let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
+              let draft = CodexUI.composerText(focused) else { return nil } // Only the focused input, never a window scan, so this read cannot hold up the next click on the shared AX queue.
+        return ResponseSpeed.unsentCommand(in: draft)
     }
 }

@@ -57,8 +57,14 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.refreshModels()
         }
 
-        watcher.onChange = { [weak self] selection in self?.barView.setCurrentSelection(selection) }
-        watcher.onFocusChange = { [weak self] in self?.barView.cancelReasoningPreview() }
+        watcher.onChange = { [weak self] selection in
+            self?.barView.setCurrentSelection(selection)
+            self?.confirmExpectedSelection(selection)
+        }
+        watcher.onFocusChange = { [weak self] in
+            self?.barView.cancelReasoningPreview()
+            self?.cancelBackgroundChecks() // Another task can show a different model, so a check still waiting there would report a false failure.
+        }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start()
 
@@ -138,6 +144,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func changeSpeed(_ request: SpeedSwitcher.Request) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
+        cancelBackgroundChecks()
         barView.setBusySpeed(true)
         barView.showStatus(nil)
         watcher.setSuspended(true)
@@ -148,6 +155,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.barView.showStatus("Speed: \(speed.rawValue)")
             case .requested(let speed):
                 self.barView.showStatus("Requested \(speed.rawValue)")
+                self.checkSpeedCommandInBackground()
             case .cancelled:
                 break
             case .cancelledForTyping:
@@ -168,6 +176,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let codex = tracker.codexApp,
               let modelID = barView.currentModelIdentifier,
               let model = allModels.first(where: { $0.id == modelID }) else { return }
+        cancelBackgroundChecks()
         barView.setBusyReasoning(true)
         barView.showStatus(nil)
         watcher.setSuspended(true)
@@ -178,6 +187,8 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.barView.setCurrentSelection(CurrentSelection(modelID: model.id, effort: effort))
                 self.watcher.refreshSoon()
             case .requested:
+                self.checkSelectionInBackground(CurrentSelection(modelID: model.id, effort: effort),
+                                                failure: "Codex did not confirm the new reasoning level", color: .systemOrange)
                 self.watcher.refreshSoon() // Let Codex's actual label update the bar; posting keys does not prove the requested effort was applied.
             case .cancelledForTyping:
                 self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
@@ -220,6 +231,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             return
         }
         guard let codex = tracker.codexApp else { return }
+        cancelBackgroundChecks()
         barView.setBusyModel(id: model.id)
         barView.showStatus(nil)
         watcher.setSuspended(true)
@@ -232,6 +244,8 @@ final class AppController: NSObject, NSApplicationDelegate {
                 if enableUltrafast { self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue) }
                 self.watcher.refreshSoon()
             case .requested:
+                self.checkSelectionInBackground(CurrentSelection(modelID: model.id, effort: nil),
+                                                failure: "Failed to switch to \(model.displayName)", color: .systemRed)
                 self.watcher.refreshSoon() // The ordinary switch ends at Return; do not fabricate a model highlight from the requested target.
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
@@ -250,6 +264,62 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.watcher.refreshSoon()
             }
             self.watcher.setSuspended(false)
+        }
+    }
+
+    // MARK: - Background checks
+
+    // Checks start after a request has finished, so they never delay the next click. Ethan rejected
+    // blocking final verification, then asked to keep it "optional in like a separate thread"
+    // (task 01a0d315-7d5e-7be0-bc08-80626ca0729b); do not make a switch wait for these again.
+    private var backgroundCheckGeneration = 0
+    /// What the watcher should report next. A nil effort accepts any effort.
+    private var expectedSelection: (selection: CurrentSelection, finishedAt: TimeInterval)?
+
+    /// A newer request or a focus change makes older checks stale; they then end silently.
+    private func cancelBackgroundChecks() {
+        backgroundCheckGeneration += 1
+        expectedSelection = nil
+    }
+
+    /// Waits for the existing watcher to report `expected`; shows `failure` if it never does.
+    private func checkSelectionInBackground(_ expected: CurrentSelection, failure: String, color: NSColor) {
+        let generation = backgroundCheckGeneration
+        expectedSelection = (expected, ProcessInfo.processInfo.systemUptime)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in // Same 5 s limit as the old blocking confirmation; waiting here delays nothing.
+            guard let self, self.backgroundCheckGeneration == generation, self.expectedSelection != nil else { return }
+            self.expectedSelection = nil
+            guard self.tracker.snapshot.codexIsFrontmost else { return } // The watcher stops reading while Codex is in the background, so its silence proves nothing.
+            Log.info("background-check kind=selection result=unconfirmed model=\(expected.modelID ?? "none") effort=\(expected.effort ?? "any")")
+            self.barView.showStatus(failure, color: color)
+        }
+    }
+
+    /// Ends the waiting selection check once the watcher reports the expected model and effort.
+    private func confirmExpectedSelection(_ selection: CurrentSelection) {
+        guard let expected = expectedSelection, selection.modelID == expected.selection.modelID,
+              expected.selection.effort == nil || selection.effort == expected.selection.effort else { return }
+        expectedSelection = nil
+        Log.info("background-check kind=selection result=confirmed elapsed=\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - expected.finishedAt))s")
+    }
+
+    /// Reports a Fast/Ultrafast command that Return left in the message box, like the
+    /// `/fast/fast` draft Ethan found on 2026-10-09.
+    private func checkSpeedCommandInBackground() {
+        let generation = backgroundCheckGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in // A lagging Codex can run a pasted command late; reading sooner would report false failures.
+            guard let self, self.backgroundCheckGeneration == generation,
+                  self.tracker.snapshot.codexIsFrontmost, let pid = self.tracker.snapshot.codexPID else { return }
+            AX.queue.async {
+                let unsent = SpeedSwitcher.unsentCommand(pid: pid)
+                DispatchQueue.main.async {
+                    guard self.backgroundCheckGeneration == generation else { return }
+                    Log.info("background-check kind=speed result=\(unsent.map { "left-\($0)" } ?? "no-command-left")")
+                    guard let unsent else { return }
+                    self.barView.showStatus("Speed change failed. Remove \"\(unsent)\" from message box",
+                                            color: .systemRed, sticky: true)
+                }
+            }
         }
     }
 

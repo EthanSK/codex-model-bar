@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.28: verify in the background, never before the next click
+
+After 1.2.27 removed blocking final checks, Ethan confirmed it was much faster and asked to keep verification "optional in like a separate thread" so it does not block anything (task 01a0d315-7d5e-7be0-bc08-80626ca0729b). Checks now start only after a request has finished. Model and reasoning checks add no Accessibility reads: they wait up to 5 seconds for the existing 0.25 s watcher to report the requested selection, then show the existing failure text. A newer request, a focus change or Codex leaving the foreground ends a check silently, because the watcher may then be reading another task or nothing at all. Do not move these checks back into the switchers or make a request wait for them.
+
+Fast/Ultrafast pastes cannot be verified without typing into the composer, which Ethan rejected. On October 9 he found `/fast/fast` left in a message box after two Fast pastes; the log also showed Standard failing at that time because its `/` discovery query could not open the command menu after the leftover text. Codex removes a slash command when it runs it, so one focused-input read 3 seconds after the paste reports a command still at the end of the draft. Read only the focused element there, never the window-wide composer lookup: the check shares the serial AX queue with the next click. It cannot detect a paste that never arrived. Automated checks and installation do not establish live acceptance.
+
 ## 1.2.27: end ordinary model and reasoning requests at the final key
 
 Ethan confirmed the installed 1.2.26 speed paste flow works faster and more reliably, then rejected blocking verification for model and reasoning changes too (task 01a0d315-7d5e-7be0-bc08-80626ca0729b). Ordinary model buttons now finish after Return: no five-second final model confirmation, draft-restoration wait, post-choice Backspace cleanup or duplicate filtered-menu read. Keep the established typed-ID route, its 37.5 ms settling and 8 ms character pacing, keyboard acquisition, one target-only readiness poll before Return, and hardware-input cancellation. Do not reintroduce those final confirmation loops; the existing background watcher reads the actual selection instead of highlighting a requested target as though it succeeded.
