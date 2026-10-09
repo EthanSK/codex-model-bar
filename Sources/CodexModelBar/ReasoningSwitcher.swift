@@ -7,6 +7,7 @@ import CodexModelBarCore
 final class ReasoningSwitcher {
     enum Result {
         case changed
+        case requested
         case cancelledForTyping
         case failed(String)
     }
@@ -37,7 +38,7 @@ final class ReasoningSwitcher {
             guard let window = AX.focusedWindow(pid: pid) else {
                 finish(.failed("No Codex window")); return
             }
-            var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+            var located = CodexUI.Cache.current(window: window, models: allModels)
             guard var composer = located.composer, let button = located.modelButton else {
                 finish(.failed("No task composer")); return
             }
@@ -70,16 +71,18 @@ final class ReasoningSwitcher {
                 guard Keyboard.pressUnlessTyping(shortcut.keyCode, flags: shortcut.flags, pid: pid) else {
                     finish(.cancelledForTyping); return
                 }
-                let expected = model.supportedEfforts[next]
-                guard let confirmed = CodexUI.confirmSelection(modelID: model.id, effort: expected,
-                    original: located, window: window, pid: pid, models: allModels, since: changedAt,
-                    logPrefix: "reasoning-switch attempt=\(attempt)") else {
-                    finish(.failed("Codex did not confirm the new reasoning level")); return
+                if next != to { // Relative shortcuts capture the current rendered effort, so only a subsequent press needs the preceding step; no final confirmation loop (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+                    let expected = model.supportedEfforts[next]
+                    guard let confirmed = CodexUI.confirmSelection(modelID: model.id, effort: expected,
+                        original: located, window: window, pid: pid, models: allModels, since: changedAt,
+                        logPrefix: "reasoning-switch attempt=\(attempt)") else {
+                        finish(.failed("Codex did not confirm the new reasoning level")); return
+                    }
+                    located = confirmed.located
+                    composer = confirmed.located.composer!
                 }
-                located = confirmed.located
-                composer = confirmed.located.composer!
             }
-            finish(.changed)
+            finish(.requested)
         }
     }
 }

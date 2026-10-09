@@ -23,21 +23,24 @@ import CodexModelBarCore
 ///     from the message box). Once every visible result is the target model, press
 ///     Return. Choosing removes the search text again; Codex keeps the current effort
 ///     when the new model supports it.
-///  4. Confirm the model button now names the target.
+///  4. Return immediately after choosing; the existing watcher reads the actual model.
+///     Only the combined Astra/Ultrafast action waits before its dependent speed step.
 ///
 /// Safety rules:
 ///  - Before **every** synthetic key, check that no real key was pressed in the last
 ///    second. If the user is typing we stop, so our keys can never interleave with
 ///    theirs (a probe that ignored this once mixed letters into a live draft).
-///  - Letters, digits and Return are sent only right after proving the `/model` menu is
-///    open and the message box has keyboard focus: while the menu is open it consumes
-///    Return and digits, so they cannot send or edit the draft.
+///  - Prove menu readiness and keyboard ownership before typing, then watch hardware
+///    input while sending the search. Read the filtered target once before Return;
+///    while the menu is open it consumes Return instead of sending the draft.
 ///  - If a search has to be abandoned, Backspace is pressed exactly once per typed
 ///    letter, and only when the message box differs from before by exactly that search.
 final class ModelSwitcher {
     enum Result: CustomStringConvertible {
         case switched(CurrentSelection)
         case alreadyCurrent(CurrentSelection)
+        /// The native choice was sent; the background watcher reports the actual selection.
+        case requested
         /// Stopped before sending another key because the user was typing.
         case cancelledForTyping
         /// `searchLeft` is the search text that could not be removed safely (nil when
@@ -48,6 +51,7 @@ final class ModelSwitcher {
             switch self {
             case .switched: return "switched"
             case .alreadyCurrent: return "alreadyCurrent"
+            case .requested: return "requested"
             case .cancelledForTyping: return "cancelledForTyping"
             case .failed(let reason, let searchLeft):
                 return "failed(\(reason)\(searchLeft.map { ", left '\($0)' in message box" } ?? ""))"
@@ -118,7 +122,7 @@ final class ModelSwitcher {
         let switchStartedAt = ProcessInfo.processInfo.systemUptime
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
         let initialFocus: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
-        var located = CodexUI.Cache.current(window: window, models: allModels, forceRefresh: true)
+        var located = CodexUI.Cache.current(window: window, models: allModels)
         if (located.modelButton == nil || located.composer == nil),
            let initialFocus, AX.role(initialFocus) == kAXTextAreaRole as String {
             Log.info("model-switch phase=wait-for-composer input=\(CodexUI.identity(initialFocus))")
@@ -192,7 +196,8 @@ final class ModelSwitcher {
                           enableUltrafast: enableUltrafast)
         } : nil
         for character in query {
-            guard isFocused(composer, pid: pid) else {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  !Keyboard.userInteracted(since: searchStartedAt) else {
                 return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                      since: searchStartedAt, result: .failed("message box lost focus while searching"),
                                      window: window, models: allModels, allowPanelRecovery: true,
@@ -206,6 +211,8 @@ final class ModelSwitcher {
             typed.append(character)
             usleep(8_000)
         }
+        // Preserve the user-confirmed typing cadence before the single target-readiness poll.
+        usleep(37_500)
         // Recent configurations and catalogue hits can repeat the target. Return picks
         // the highlighted result, so every visible result must name that same model.
         let onlyTarget = poll(timeout: 1.5) { () -> Bool? in
@@ -223,18 +230,13 @@ final class ModelSwitcher {
                                  window: window, models: allModels, allowPanelRecovery: true,
                                  retryAfterPanelLoss: retryAfterPanelLoss)
         }
-        // Let the filtered result settle, then recheck before Return.
-        usleep(37_500)
         guard !Keyboard.userInteracted(since: searchStartedAt) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                  since: searchStartedAt, result: .cancelledForTyping,
                                  window: window, models: allModels, retryAfterPanelLoss: nil)
         }
-        // Return is safe only while the menu is open: Codex's menu handles it first. Check
-        // the menu and focus immediately before sending it.
-        guard let finalMenu = CodexUI.modelMenu(near: composer), isFocused(composer, pid: pid),
-              CurrentModelMatcher.searchResultsOnlyMatch(target.id,
-                  titles: (finalMenu.recent + finalMenu.matching).map(AX.title), among: allModels) else {
+        // The readiness read just proved the target menu; check keyboard ownership before Return.
+        guard isFocused(composer, pid: pid) else {
             Log.info("model-switch attempt=\(attempt) phase=before-choice-lost keyboardOwner=\(AX.keyboardOwnerPID().map(String.init) ?? "none")")
             return abandonSearch(typed, before: before, composer: composer, pid: pid,
                                  since: searchStartedAt, result: .failed("Codex's /model menu closed before choosing"),
@@ -248,6 +250,7 @@ final class ModelSwitcher {
                                  since: searchStartedAt, result: .cancelledForTyping,
                                  window: window, models: allModels, retryAfterPanelLoss: nil)
         }
+        if !enableUltrafast { return .requested } // Ethan rejected blocking verification; do not restore final model/draft polling or post-choice Backspace cleanup for ordinary buttons (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         let confirmed = CodexUI.confirmSelection(modelID: target.id, original: located, window: window,
             pid: pid, models: allModels, since: chosenAt, readOriginalAfterUserInput: true,
             logPrefix: "model-switch attempt=\(attempt)")
@@ -263,13 +266,12 @@ final class ModelSwitcher {
         }
         Log.info("model-switch attempt=\(attempt) phase=search-cleanup result=\(cleanup) modelConfirmed=\(confirmed != nil)")
         if confirmed == nil { closeMenuIfOpen(composer: composer, pid: pid) }
-        if enableUltrafast, let confirmed, cleanup == .restored,
+        if let confirmed, cleanup == .restored,
            !Keyboard.userInteracted(since: searchStartedAt) {
             return selectUltrafast(original: confirmed.located, window: window, pid: pid,
                                   models: allModels, selection: confirmed.selection, since: switchStartedAt)
         }
-        if enableUltrafast { return .failed("Astra/Ultrafast change could not be confirmed") }
-        return searchResult(confirmed: confirmed?.selection, cleanup: cleanup, query: typed)
+        return .failed("Astra/Ultrafast change could not be confirmed")
     }
 
     /// Inspect /ultrafast in the same composer, choose it only when OFF, then
@@ -339,12 +341,6 @@ final class ModelSwitcher {
         guard cleanup() else { return .failed("Ultrafast enabled; draft restoration could not be confirmed") }
         Log.info("mouse-shortcut result=confirmed model=gpt-6-astra speed=ultrafast alreadyEnabled=false")
         return .switched(selection)
-    }
-
-    static func searchResult(confirmed: CurrentSelection?, cleanup: ComposerText.CleanupState, query: String) -> Result {
-        if cleanup == .remaining { return .failed("search text stayed in the message box", searchLeft: query) }
-        if let confirmed { return .switched(confirmed) }
-        return .failed("Codex did not confirm the new model")
     }
 
     /// The text to type into the /model search: the model id (it matches Codex's entry

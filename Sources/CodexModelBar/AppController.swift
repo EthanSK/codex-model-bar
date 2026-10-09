@@ -177,6 +177,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             case .changed:
                 self.barView.setCurrentSelection(CurrentSelection(modelID: model.id, effort: effort))
                 self.watcher.refreshSoon()
+            case .requested:
+                self.watcher.refreshSoon() // Let Codex's actual label update the bar; posting keys does not prove the requested effort was applied.
             case .cancelledForTyping:
                 self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
                 self.watcher.refreshSoon()
@@ -229,6 +231,8 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.barView.setCurrentSelection(selection)
                 if enableUltrafast { self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue) }
                 self.watcher.refreshSoon()
+            case .requested:
+                self.watcher.refreshSoon() // The ordinary switch ends at Return; do not fabricate a model highlight from the requested target.
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
                 self.barView.showStatus("Switch cancelled while typing", color: .systemOrange)

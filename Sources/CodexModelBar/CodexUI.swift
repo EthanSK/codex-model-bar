@@ -97,8 +97,8 @@ enum CodexUI {
         return ComposerText.visibleText(value: value, placeholder: AX.title(composer))
     }
 
-    /// Confirmation is read-only. Re-read the live tree even when the old input
-    /// stops answering AX calls; otherwise a remount can never be discovered.
+    /// Confirmation is read-only. Cached controls still supply their live titles;
+    /// discover the tree again when the old input stops answering AX calls.
     /// User input or a window change ends the attempt rather than retargeting it.
     struct ConfirmedSelection {
         let located: Located
@@ -125,7 +125,8 @@ enum CodexUI {
                 Log.info("\(logPrefix) phase=confirm-stopped reason=user-or-window-changed")
                 return nil
             }
-            let located = Cache.current(window: window, models: models, forceRefresh: true)
+            let inputReadable = original.composer.map { AX.role($0) == kAXTextAreaRole as String } ?? false
+            let located = Cache.current(window: window, models: models, forceRefresh: !inputReadable) // Read the cached live controls between reasoning steps; a detached input still forces remount discovery instead of freezing on the old element.
             let selection = CurrentModelMatcher.selection(forButtonTitle: located.modelButton.map(AX.title) ?? "",
                                                            among: models)
             let sameContext = located.identity.map { identity.matches($0, equals: { CFEqual($0, $1) }) } ?? false
