@@ -4,6 +4,7 @@ import CodexModelBarCore
 
 /// Uses the slash route Ethan requested. Do not restore the rejected picker fallback,
 /// per-character tree scans or repeated confirmation queries (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+/// Fast and Ultrafast now use ordinary foreground paste/Return, not command-menu isolation.
 final class SpeedSwitcher {
     enum Request { case select(ResponseSpeed), command(ResponseSpeed) }
     enum Result { case changed(ResponseSpeed), requested(ResponseSpeed), cancelled, cancelledForTyping, failed(String) }
@@ -66,15 +67,27 @@ final class SpeedSwitcher {
         guard isCurrent() else { return .cancelled }
         guard codex.isActive, AX.keyboardOwnerPID() == pid else { return .failed("Codex did not receive keyboard focus") } // Mouse URLs must never activate the bar or steal focus back from Agent Flow.
         guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
+        let speed: ResponseSpeed
+        switch request {
+        case .select(let selected), .command(let selected): speed = selected
+        }
+        if speed != .standard {
+            let command = "/\(speed.rawValue.lowercased())"
+            guard SpeedCommandPaste.post(command, canPost: { isCurrent() && codex.isActive }) else {
+                return isCurrent() ? .failed("Speed commands are unavailable in this composer") : .cancelled
+            }
+            return .requested(speed) // Ethan rejected per-click isolation and verification under lag; keep Agent Flow's paste/Return route, not the old query-and-Backspace flow (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        }
+        guard case .select = request else { return .failed("Speed commands are unavailable in this composer") }
         AX.enableWebAccessibility(pid: pid)
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("No Codex window") }
-        let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
+        let located = CodexUI.Cache.current(window: window, models: models)
         guard let composer = located.composer, let modelButton = located.modelButton,
               let draft = CodexUI.composerText(composer) else {
             return .failed("No task composer")
         }
         let modelID = CurrentModelMatcher.selection(forButtonTitle: AX.title(modelButton), among: models).modelID
-        if case .select = request { AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue) }
+        AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         guard ModelSwitcher.waitUntil(timeout: 0.3, { CodexUI.composerHasFocus(composer, pid: pid) }),
               AX.string(composer, kAXSelectedTextAttribute).isEmpty, CodexUI.modelMenu(near: composer) == nil else {
             return .failed("Close the picker or clear the text selection first")
@@ -110,49 +123,19 @@ final class SpeedSwitcher {
             return ModelSwitcher.poll(timeout: 0.5) {
                 guard isCurrent(), sameFocus(), ComposerText.cleanupState(query, before: draft, after: CodexUI.composerText(composer)) == .remaining else { return nil }
                 guard let commands = CodexUI.speedCommands(near: composer) else { return nil }
-                if query != "/" {
-                    guard commands.count == 1, commands.keys.first.map({ "/\($0.rawValue.lowercased())" }) == query else { return nil } // Wait for filtering to finish; an earlier menu snapshot is not the target command.
-                }
                 return commands
             }
         }
-        let commandSpeed: ResponseSpeed
-        let target: ResponseSpeed?
-        switch request {
-        case .command(let speed):
-            guard speed != .standard else { return .failed("Speed commands are unavailable in this composer") }
-            commandSpeed = speed
-            target = nil
-        case .select(let speed):
-            target = speed
-            if speed == .standard {
-                guard let commands = inspect("/") else { return .failed("Speed commands are unavailable in this composer") }
-                let enabled = commands.filter { $0.value.1 == .enabled }.map(\.key)
-                guard enabled.count <= 1 else { return .failed("Codex's current speed is ambiguous") }
-                guard let current = enabled.first else {
-                    return cleanup() ? .changed(.standard) : .failed("Could not restore the draft after checking speed")
-                }
-                commandSpeed = current // Standard turns off the active toggle; Codex has no /standard command.
-            } else { commandSpeed = speed }
+        guard let commands = inspect("/") else { return .failed("Speed commands are unavailable in this composer") }
+        let enabled = commands.filter { $0.value.1 == .enabled }.map(\.key)
+        guard enabled.count <= 1 else { return .failed("Codex's current speed is ambiguous") }
+        guard let current = enabled.first else {
+            return cleanup() ? .changed(.standard) : .failed("Could not restore the draft after checking speed")
         }
-        let query = "/\(commandSpeed.rawValue.lowercased())"
-        guard let commands = inspect(query), commands.count == 1, let (command, state) = commands[commandSpeed] else {
-            return isCurrent() ? .failed("Could not isolate \(query) in Codex's command menu") : .cancelled
-        }
-        if let target, (target == .standard) == (state == .disabled) {
-            return cleanup() ? .changed(target) : .failed("Could not restore the draft after checking speed")
-        }
-        guard isCurrent(), sameComposer(),
-              ComposerText.cleanupState(query, before: draft, after: CodexUI.composerText(composer)) == .remaining,
-              (AX.attribute(command, kAXEnabledAttribute) as Bool?) == true,
-              SpeedCommandState.read(title: AX.title(command), speed: commandSpeed) == state, sameFocus(), isCurrent(), // Revalidate the exact menu entry just found; a second full-tree scan adds latency without selecting anything else.
-              Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
+        guard cleanup(), isCurrent(), sameFocus(),
+              SpeedCommandPaste.post("/\(current.rawValue.lowercased())", canPost: { isCurrent() && codex.isActive }) else {
             return isCurrent() ? .failed("Speed command changed before selection") : .cancelled
         }
-        guard ModelSwitcher.waitUntil(timeout: 0.5, { CodexUI.composerText(composer) == draft }) else {
-            return .failed("Could not restore the draft after checking speed")
-        }
-        inserted = ""
-        return .requested(state == .enabled ? .standard : commandSpeed) // Query consumption confirms submission, not the new tier; do not type it again to claim confirmation.
+        return .requested(.standard) // Codex has no /standard command, so only this button reads the active toggle once; the actual paste/Return is never retyped to verify it.
     }
 }

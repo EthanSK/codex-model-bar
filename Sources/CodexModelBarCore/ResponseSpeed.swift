@@ -7,8 +7,8 @@ public enum ResponseSpeed: String, CaseIterable, Sendable {
     case ultrafast = "Ultrafast"
 }
 
-/// Slash commands toggle an already selected tier OFF. Read the native description
-/// before Return so an icon remains an explicit selection, including repeated clicks.
+/// Slash commands toggle an already selected tier OFF. Standard reads the native
+/// description to choose the active toggle; the combined Astra shortcut also uses it.
 public enum SpeedCommandState: Equatable {
     case enabled, disabled
 

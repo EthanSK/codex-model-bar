@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.26: use Agent Flow's foreground paste and Return for speed toggles
+
+October 9 diagnostics showed Fast failing with `Could not isolate /fast in Codex's command menu`, followed by removal of the inserted query before Return. Ethan rejected per-click verification and asked for the working Agent Flow paste flow. Its `CursorPaster.pasteFromClipboard` posts physical Command-V with a private source and 10 ms key spacing; `issueAutoSendUsingCGEvent` uses HID Return with a 30 ms down/up interval because private back-to-back Return was ignored by Electron. Fast and Ultrafast now use that sequence directly, before composer discovery. Do not reintroduce command isolation, query retyping, Backspace cleanup or full-tree verification for these toggles (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+
+The clipboard command remains available for a lagging paste reader, matching Agent Flow's current foreground setting; a timed restoration could supply an older payload before consumption. Fast/Ultrafast icons now have native toggle semantics, including turning an active tier off on a repeated click. Standard alone still discovers which command to turn off because Codex has no `/standard`; it then uses the same paste/Return sequence without a filtered or confirmation query. Model switching, reasoning and the separate combined Astra/Ultrafast shortcut retain their existing paths. The earlier speed isolation and clipboard-untouched instructions below are historical and superseded for Fast/Ultrafast, not a reason to restore the rejected flow. Automated checks and signed installation do not establish live Codex acceptance.
+
 ## 1.2.25: live Ultrafast metadata includes sentence punctuation
 
 The October 9 installed log showed Fast and Standard working while Ultrafast failed with `Could not isolate /ultrafast in Codex's command menu`. The live Sol 6.1 and Astra model cache supplies `The fastest available responses for latency-sensitive work.` with a final period; Codex's bundled default omits that period. The exact command matcher accepted only the latter, causing the failed attempt to remove its own query before Return. Accept these two exact descriptions and continue rejecting bare labels, trailing unrelated text and malformed descriptions. The regression failed against 1.2.24 before the fix.
