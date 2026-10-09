@@ -18,17 +18,4 @@ final class ResponseSpeedTests: XCTestCase {
             XCTAssertNil(SpeedCommandState.read(title: title, speed: .fast), title)
         }
     }
-
-    func testWheelStepsDoNotWrapAndRespectAvailableSpeeds() {
-        let all: Set<ResponseSpeed> = [.fast, .ultrafast]
-        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: all), .fast)
-        XCTAssertEqual(ResponseSpeed.fast.stepped(up: true, available: all), .ultrafast)
-        XCTAssertEqual(ResponseSpeed.ultrafast.stepped(up: true, available: all), .ultrafast)
-        XCTAssertEqual(ResponseSpeed.ultrafast.stepped(up: false, available: all), .fast)
-        XCTAssertEqual(ResponseSpeed.fast.stepped(up: false, available: all), .standard)
-        XCTAssertEqual(ResponseSpeed.standard.stepped(up: false, available: all), .standard)
-        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: [.ultrafast]), .ultrafast)
-        XCTAssertEqual(ResponseSpeed.fast.stepped(up: true, available: [.fast]), .fast)
-        XCTAssertEqual(ResponseSpeed.standard.stepped(up: true, available: []), .standard)
-    }
 }

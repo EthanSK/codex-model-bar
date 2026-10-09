@@ -1,17 +1,10 @@
 import Foundation
 
-/// Codex's response speeds, ordered for the mouse wheel shortcuts.
+/// Codex's response speed choices.
 public enum ResponseSpeed: String, CaseIterable, Sendable {
     case standard = "Standard"
     case fast = "Fast"
     case ultrafast = "Ultrafast"
-
-    /// Step only through choices that Codex actually exposes, without wrapping.
-    public func stepped(up: Bool, available: Set<Self>) -> Self {
-        let choices = Self.allCases.filter { $0 == .standard || available.contains($0) }
-        guard let index = choices.firstIndex(of: self) else { return self }
-        return choices[max(0, min(choices.count - 1, index + (up ? 1 : -1)))]
-    }
 }
 
 /// Slash commands toggle an already selected tier OFF. Read the native description

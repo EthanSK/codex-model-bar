@@ -146,6 +146,10 @@ final class AppController: NSObject, NSApplicationDelegate {
             switch result {
             case .changed(let speed):
                 self.barView.showStatus("Speed: \(speed.rawValue)")
+            case .requested(let speed):
+                self.barView.showStatus("Requested \(speed.rawValue)")
+            case .cancelled:
+                break
             case .cancelledForTyping:
                 self.barView.showStatus("Speed change cancelled while typing", color: .systemOrange)
             case .failed(let reason):
@@ -190,10 +194,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard urls.count == 1, let url = urls.first, let action = MouseShortcut.action(for: url) else { return }
         switch action {
         case .speedUp:
-            changeSpeed(.increase)
+            changeSpeed(.command(.ultrafast))
             return
         case .speedDown:
-            changeSpeed(.decrease)
+            changeSpeed(.command(.fast))
+            return
+        case .speedCancel:
+            speedSwitcher.cancelMouseCommands()
             return
         case .astraUltrafast: break
         }

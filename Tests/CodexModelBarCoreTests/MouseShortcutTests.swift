@@ -21,7 +21,7 @@ final class MouseShortcutTests: XCTestCase {
     }
 
     func testSpeedRatchetURLsAcceptOnlyFixedPayloadFreeActions() throws {
-        for (name, expected) in [("speed-up", MouseShortcut.Action.speedUp), ("speed-down", .speedDown)] {
+        for (name, expected) in [("speed-up", MouseShortcut.Action.speedUp), ("speed-down", .speedDown), ("speed-cancel", .speedCancel)] {
             XCTAssertEqual(MouseShortcut.action(for: try XCTUnwrap(URL(string: "codex-model-bar://\(name)"))), expected)
             for extra in ["/extra", "?speed=fast", "#text", ":123"] {
                 XCTAssertNil(MouseShortcut.action(for: try XCTUnwrap(URL(string: "codex-model-bar://\(name)\(extra)"))))
