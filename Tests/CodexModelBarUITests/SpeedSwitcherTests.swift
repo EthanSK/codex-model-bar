@@ -37,11 +37,11 @@ final class SpeedSwitcherTests: XCTestCase {
         board.setString("old clipboard", forType: .string)
         board.setData(Data([1, 2]), forType: .rtf)
         XCTAssertTrue(SpeedCommandPaste.prepare("/ultrafast", on: board))
-        XCTAssertEqual(board.string(forType: .string), "/ultrafast")
+        XCTAssertEqual(board.string(forType: .string), " /ultrafast")
         XCTAssertNil(board.data(forType: .rtf))
         let payloadStays = expectation(description: "Payload stays for delayed paste")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(board.string(forType: .string), "/ultrafast")
+            XCTAssertEqual(board.string(forType: .string), " /ultrafast")
             board.clearContents()
             board.setString("newer user copy", forType: .string)
             payloadStays.fulfill()
@@ -54,6 +54,38 @@ final class SpeedSwitcherTests: XCTestCase {
         let changeCount = NSPasteboard.general.changeCount
         XCTAssertFalse(SpeedCommandPaste.post("/fast", canPost: { false }))
         XCTAssertEqual(NSPasteboard.general.changeCount, changeCount)
+    }
+
+    func testSpeedPasteMatchesCodexInlineCommandBoundaryWithExistingDrafts() throws {
+        // The installed Codex composer's actual suggestion pattern (Fj/Uj).
+        // Its match is on text BEFORE the caret; the suggestion consumes only
+        // the trigger and query, not the draft or the separating whitespace.
+        let matcher = try NSRegularExpression(pattern: #"(?:^|\s)([/@$])([\p{L}\p{N}\p{M}.:_/\\-]*)$"#)
+        for command in ["/fast", "/ultrafast"] {
+            for draft in ["", "review", "review.", "review ", "review\n", "🦀 café", "https://example.com/path"] {
+                let text = draft + SpeedCommandPaste.payload(command)
+                let match = try XCTUnwrap(matcher.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)), text)
+                XCTAssertEqual((text as NSString).substring(with: match.range(at: 1)), "/")
+                XCTAssertEqual((text as NSString).substring(with: match.range(at: 2)), String(command.dropFirst()))
+                let consumed = NSRange(location: match.range(at: 1).location,
+                                       length: command.utf16.count)
+                XCTAssertEqual((text as NSString).replacingCharacters(in: consumed, with: ""), draft + " ")
+            }
+        }
+        XCTAssertNil(matcher.firstMatch(in: "review/fast", range: NSRange(location: 0, length: 11)),
+                     "The reported old concatenation must reproduce a missing command suggestion")
+    }
+
+    func testPasteAtMiddleCaretPreservesTheFollowingDraftText() throws {
+        let beforeCaret = "review", afterCaret = " the changes"
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        for command in ["/fast", "/ultrafast"] {
+            XCTAssertTrue(SpeedCommandPaste.prepare(command, on: board))
+            let payload = try XCTUnwrap(board.string(forType: .string))
+            XCTAssertEqual(beforeCaret + payload + afterCaret,
+                           "review " + command + " the changes")
+        }
     }
 
     func testReleaseCancelsBothQueuedRatchetsWithoutEnteringTheApp() {

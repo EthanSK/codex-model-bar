@@ -19,10 +19,16 @@ enum SpeedCommandPaste {
         return events
     }
 
+    /// Codex's inline matcher requires start-of-text or whitespace before `/`.
+    /// Always supply the boundary: a plain `/fast` at a draft's end becomes
+    /// literal `draft/fast`, so Return cannot toggle Fast back to Standard.
+    /// Codex removes only its suggestion range, preserving the surrounding draft.
+    static func payload(_ command: String) -> String { " " + command }
+
     /// Leave the command available until the receiving app consumes its queued paste.
     static func prepare(_ command: String, on board: NSPasteboard) -> Bool {
         board.clearContents()
-        return board.setString(command, forType: .string) // Agent Flow's current foreground route leaves its clipboard payload too; timed restoration could replace a command before a lagging app reads it.
+        return board.setString(payload(command), forType: .string) // Agent Flow's current foreground route leaves its clipboard payload too; timed restoration could replace a command before a lagging app reads it.
     }
 
     /// Paste once and post one Return; no command-menu checks, retries or text cleanup.
