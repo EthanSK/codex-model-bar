@@ -201,3 +201,10 @@ Wheel release cancels queued work through the fixed payload-free `speed-cancel` 
 ## 2026-11-05 — Keep the normal toolbar position when a HUD clears it
 
 Use actual window bounds to decide if the normal bar position is clear. A shrinking HUD can stop covering the bar while its four-point placement margin still overlaps; treating that margin as obstruction briefly sends the bar to the left edge. Reserve the margin for choosing an alternative position. The overlapping, shrinking and removed-HUD transition has regression coverage; all 158 Swift tests passed. Native recording-stop visual acceptance remains separate from automated geometry checks.
+
+## Signed app updates (2026-11-05)
+
+- Embed Sparkle.framework in Contents/Frameworks and add @executable_path/../Frameworks to the executable rpath. Verify the final bundle with --check-packaged-launch; a successful Swift link and codesign verification alone do not prove it loads.
+- Ad-hoc test packages must not enable hardened-runtime library validation. Developer ID release signing re-signs Sparkle's nested helpers, then its framework and the outer app with the same identity and a timestamp.
+- Release signing accepts only the CI archive whose SHA-256 and source commit match its receipt. Apple must accept notarization, and the final archive must retain a validated stapled ticket before generating the signed feed. Signing keys remain in Keychain.
+- Model, reasoning and speed completions already return on the main thread after their busy state clears. Resume a postponed updater relaunch there; keep existing keyboard timing, focus restoration and cancellation paths intact. The relaunch guard has offline tests and must not be tested by sending real chat actions.

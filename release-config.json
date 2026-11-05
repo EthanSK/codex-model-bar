@@ -1,0 +1,10 @@
+{
+  "repo": "codex-model-bar",
+  "app": "Codex Model Bar",
+  "exe": "CodexModelBar",
+  "account": "com.ethansk.codex-model-bar",
+  "plist": "Resources/Info.plist",
+  "prebuilt": "build.noindex/CodexModelBar-prebuilt.zip",
+  "version": "files",
+  "download": "CodexModelBar-macOS-universal.zip"
+}

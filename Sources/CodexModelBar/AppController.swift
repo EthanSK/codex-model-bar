@@ -8,7 +8,7 @@ import CodexModelBarCore
 ///  - `ModelCatalogService` supplies the model list,
 ///  - `CurrentModelWatcher` highlights the open chat's model,
 ///  - `ModelSwitcher` performs a switch when a button is clicked.
-final class AppController: NSObject, NSApplicationDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let tracker = CodexWindowTracker()
     private let panel = BarPanel()
     private let barView = BarView(frame: .zero)
@@ -17,6 +17,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let switcher = ModelSwitcher()
     private let reasoningSwitcher = ReasoningSwitcher()
     private let speedSwitcher = SpeedSwitcher()
+    private var updater: AppUpdater?
 
     /// Every model Codex offers (before the user's show/hide choices).
     private var allModels: [CodexModel] = []
@@ -29,6 +30,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("startup version=\(AppInfo.version) build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "dev") pid=\(ProcessInfo.processInfo.processIdentifier)")
         Log.resourcesIfNeeded()
+        updater = AppUpdater(mayInstall: { [weak self] in
+            guard let self else { return false }
+            return !self.switcher.isBusy && !self.reasoningSwitcher.isBusy && !self.speedSwitcher.isBusy
+        })
+        updater?.start()
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
         barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
@@ -171,6 +177,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         watcher.setSuspended(true)
         speedSwitcher.change(request, codex: codex) { [weak self] result in
             guard let self else { return }
+            defer { self.updater?.resumeIfIdle() }
             switch result {
             case .changed(let speed):
                 self.barView.showStatus("Speed: \(speed.rawValue)")
@@ -206,6 +213,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         watcher.setSuspended(true)
         reasoningSwitcher.change(request, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
+            defer { self.updater?.resumeIfIdle() }
             switch result {
             case .changed(let selection):
                 self.barView.setCurrentSelection(selection)
@@ -271,6 +279,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         watcher.setSuspended(true)
         switcher.switchModel(to: model, allModels: allModels, codex: codex, enableUltrafast: enableUltrafast) { [weak self] result in
             guard let self else { return }
+            defer { self.updater?.resumeIfIdle() }
             self.barView.setBusyModel(id: nil)
             switch result {
             case .switched(let selection), .alreadyCurrent(let selection):
@@ -354,6 +363,20 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(refresh)
 
         menu.addItem(.separator())
+        let check = NSMenuItem(title: "Check for updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        check.target = self
+        check.isEnabled = updater?.canCheck ?? false
+        menu.addItem(check)
+        let checks = NSMenuItem(title: "Check for updates automatically", action: #selector(toggleUpdateChecks), keyEquivalent: "")
+        checks.target = self
+        checks.state = updater?.automaticChecks == true ? .on : .off
+        menu.addItem(checks)
+        let downloads = NSMenuItem(title: "Download updates automatically", action: #selector(toggleUpdateDownloads), keyEquivalent: "")
+        downloads.target = self
+        downloads.state = updater?.automaticDownloads == true ? .on : .off
+        downloads.isEnabled = updater?.automaticChecks == true
+        menu.addItem(downloads)
+        menu.addItem(.separator())
         let login = NSMenuItem(title: "Open at login", action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -375,6 +398,23 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshFromMenu() { refreshModels() }
+
+    @objc private func checkForUpdates() { updater?.checkForUpdates() }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(checkForUpdates): return updater?.canCheck ?? false
+        case #selector(toggleUpdateDownloads): return updater?.automaticChecks == true
+        default: return true
+        }
+    }
+    @objc private func toggleUpdateChecks() {
+        guard let updater else { return }
+        updater.automaticChecks.toggle()
+    }
+    @objc private func toggleUpdateDownloads() {
+        guard let updater else { return }
+        updater.automaticDownloads.toggle()
+    }
 
     @objc private func quit() { NSApp.terminate(nil) }
 

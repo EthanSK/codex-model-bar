@@ -60,6 +60,8 @@ final class ModelSwitcher {
     }
 
     private var busy = false
+    // The updater waits for the same operation boundary as normal model requests.
+    var isBusy: Bool { busy }
 
     /// Starts a switch. `completion` runs on the main thread.
     func switchModel(to target: CodexModel, allModels: [CodexModel], codex: NSRunningApplication,

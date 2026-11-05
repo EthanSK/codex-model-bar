@@ -12,11 +12,15 @@ import PackageDescription
 let package = Package(
     name: "CodexModelBar",
     platforms: [.macOS(.v13)],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
+    ],
     targets: [
         .target(name: "CodexModelBarCore"),
         .executableTarget(
             name: "CodexModelBar",
-            dependencies: ["CodexModelBarCore"]
+            dependencies: ["CodexModelBarCore", .product(name: "Sparkle", package: "Sparkle")],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
             name: "CodexModelBarCoreTests",
