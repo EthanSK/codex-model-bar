@@ -218,3 +218,9 @@ This records the completed permission investigation and owner requirements; it d
 - Ad-hoc test packages must not enable hardened-runtime library validation. Developer ID release signing re-signs Sparkle's nested helpers, then its framework and the outer app with the same identity and a timestamp.
 - Release signing accepts only the CI archive whose SHA-256 and source commit match its receipt. Apple must accept notarization, and the final archive must retain a validated stapled ticket before generating the signed feed. Signing keys remain in Keychain.
 - Model, reasoning and speed completions already return on the main thread after their busy state clears. Resume a postponed updater relaunch there; keep existing keyboard timing, focus restoration and cancellation paths intact. The relaunch guard has offline tests and must not be tested by sending real chat actions.
+
+## 2026-11-05 — Accessibility grants can retain an old signing identity
+
+A toolbar Accessibility row was enabled, but its saved code requirement still named Apple Development. The current Developer ID release failed that exact requirement; the retained previous development app passed. The toolbar's untrusted result was correct, rather than a missed permission poll. Switching signing families needs a refreshed grant for the actual installed app; a restart alone does not change the saved requirement.
+
+Local builds now prefer Developer ID when available, matching the public release family instead of switching back to development signing. Explicit `CODEX_MODEL_BAR_SIGN_ID` overrides and the CI ad-hoc build remain unchanged. Keep an appropriate development/ad-hoc option for machines without a Developer ID certificate; do not bypass macOS consent or edit its privacy database to repair the transition.

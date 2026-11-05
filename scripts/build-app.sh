@@ -3,8 +3,8 @@
 #
 # Usage: scripts/build-app.sh [--no-install]
 #
-# A stable Apple Development identity keeps Accessibility permission across
-# rebuilds. Other machines can use an ad-hoc signature for a first install.
+# Keep the release signing family when available so local installs do not break
+# an existing Accessibility grant. Other machines can use development or ad-hoc signing.
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
@@ -26,7 +26,9 @@ case "$ARCH" in
 esac
 SIGN_ID="${CODEX_MODEL_BAR_SIGN_ID:-}"
 if [[ -z "$SIGN_ID" ]]; then
-  if security find-identity -v -p codesigning 2>/dev/null | grep -q 'Apple Development'; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application:'; then
+    SIGN_ID="Developer ID Application:" # Public releases use this signing family; Apple Development would no longer match their Accessibility grant.
+  elif security find-identity -v -p codesigning 2>/dev/null | grep -q 'Apple Development'; then
     SIGN_ID="Apple Development"
   else
     SIGN_ID="-"
