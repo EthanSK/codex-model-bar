@@ -2,7 +2,7 @@ import Foundation
 
 /// Fixed local actions only; a URL cannot supply text or an arbitrary command.
 public enum MouseShortcut {
-    public enum Action { case astraUltrafast, speedUp, speedDown, speedCancel }
+    public enum Action { case astraUltrafast, speedUp, speedDown, speedCancel, reasoningUp, reasoningDown, reasoningCancel }
     public static let astraModelID = "gpt-6-astra"
     public static func isAstraUltrafast(_ url: URL) -> Bool {
         action(for: url) == .astraUltrafast
@@ -15,6 +15,9 @@ public enum MouseShortcut {
         case "speed-up": return .speedUp
         case "speed-down": return .speedDown
         case "speed-cancel": return .speedCancel
+        case "reasoning-up": return .reasoningUp
+        case "reasoning-down": return .reasoningDown
+        case "reasoning-cancel": return .reasoningCancel
         default: return nil
         }
     }

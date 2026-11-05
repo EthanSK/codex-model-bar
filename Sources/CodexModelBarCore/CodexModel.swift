@@ -22,19 +22,22 @@ public struct CodexModel: Codable, Equatable, Hashable, Sendable {
     /// Effort levels the picker exposes, in increasing order.
     public var supportedEfforts: [String]
     public var defaultEffort: String?
+    /// Faster tiers the model offers besides Standard, e.g. `[.fast, .ultrafast]` for GPT-6.1 Sol and `[]` for Opus.
+    public var speedTiers: [ResponseSpeed]
 
     public init(id: String, displayName: String, description: String = "", hidden: Bool = false,
-                supportedEfforts: [String] = [], defaultEffort: String? = nil) {
+                supportedEfforts: [String] = [], defaultEffort: String? = nil, speedTiers: [ResponseSpeed] = []) {
         self.id = id
         self.displayName = displayName
         self.description = description
         self.hidden = hidden
         self.supportedEfforts = supportedEfforts
         self.defaultEffort = defaultEffort
+        self.speedTiers = speedTiers
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, displayName, description, hidden, supportedEfforts, defaultEffort
+        case id, displayName, description, hidden, supportedEfforts, defaultEffort, speedTiers
     }
 
     /// Lists cached by older releases did not contain effort data.
@@ -46,6 +49,7 @@ public struct CodexModel: Codable, Equatable, Hashable, Sendable {
         hidden = try values.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
         supportedEfforts = try values.decodeIfPresent([String].self, forKey: .supportedEfforts) ?? []
         defaultEffort = try values.decodeIfPresent(String.self, forKey: .defaultEffort)
+        speedTiers = try values.decodeIfPresent([ResponseSpeed].self, forKey: .speedTiers) ?? [] // Saved before 1.2.60; the next catalogue read fills it in.
     }
 }
 
@@ -72,7 +76,8 @@ public enum CodexModelParsing {
                 hidden: row["hidden"] as? Bool ?? false,
                 supportedEfforts: (row["supportedReasoningEfforts"] as? [[String: Any]] ?? [])
                     .compactMap { $0["reasoningEffort"] as? String },
-                defaultEffort: row["defaultReasoningEffort"] as? String
+                defaultEffort: row["defaultReasoningEffort"] as? String,
+                speedTiers: (row["additionalSpeedTiers"] as? [String] ?? []).compactMap(ResponseSpeed.init(speedTier:)) // Measured on desktop 26.1027: ["fast","ultrafast"] for GPT-6.1 Sol, [] for Opus.
             )
         }
         let cursor = result["nextCursor"] as? String
@@ -100,7 +105,8 @@ public enum CodexModelParsing {
                 hidden: visibility != "list",
                 supportedEfforts: (row["supported_reasoning_levels"] as? [[String: Any]] ?? [])
                     .compactMap { $0["effort"] as? String },
-                defaultEffort: row["default_reasoning_level"] as? String
+                defaultEffort: row["default_reasoning_level"] as? String,
+                speedTiers: (row["additional_speed_tiers"] as? [String] ?? []).compactMap(ResponseSpeed.init(speedTier:))
             )
         }
     }

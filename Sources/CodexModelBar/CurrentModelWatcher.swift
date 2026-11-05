@@ -13,6 +13,7 @@ final class CurrentModelWatcher {
     private var models: [CodexModel] = []
     private var timer: Timer?
     private var observer: AXObserver?
+    private var observedApplication: AXUIElement?
     private var lastReported: CurrentSelection?
     private var revision = 0
     private var inFlight = false
@@ -25,6 +26,8 @@ final class CurrentModelWatcher {
 
     // Only touched on AX.queue.
     private var enabledWebAXForPID: pid_t?
+    private var savedSpeedRead: (modified: Date, speed: ResponseSpeed?)? // The poll runs four times a second; re-read the 70 KB config only after Codex rewrites it.
+    private let codexConfigURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")
 
     init(readSelection: Reader? = nil, isTrusted: @escaping () -> Bool = { AX.isTrusted },
          observesFocus: Bool = true) {
@@ -35,9 +38,7 @@ final class CurrentModelWatcher {
 
     deinit {
         timer?.invalidate()
-        if let observer {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
-        }
+        removeObserver()
     }
 
     func update(pid: pid_t?, models: [CodexModel]) {
@@ -79,10 +80,7 @@ final class CurrentModelWatcher {
     }
 
     private func installObserver(pid: pid_t?) {
-        if let observer {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
-        }
-        observer = nil
+        removeObserver()
         guard observesFocus, isTrusted(), let pid else { return }
         var created: AXObserver?
         guard AXObserverCreate(pid, { _, _, _, context in
@@ -93,11 +91,25 @@ final class CurrentModelWatcher {
         }, &created) == .success, let created else { return }
         observer = created
         let app = AXUIElementCreateApplication(pid)
+        observedApplication = app
         let context = Unmanaged.passUnretained(self).toOpaque()
         for notification in [kAXFocusedUIElementChangedNotification, kAXFocusedWindowChangedNotification] {
             AXObserverAddNotification(created, app, notification as CFString, context)
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(created), .commonModes)
+    }
+
+    private func removeObserver() {
+        if let observer {
+            if let app = observedApplication {
+                for notification in [kAXFocusedUIElementChangedNotification, kAXFocusedWindowChangedNotification] {
+                    AXObserverRemoveNotification(observer, app, notification as CFString)
+                }
+            }
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        }
+        observer = nil
+        observedApplication = nil
     }
 
     private func poll(force: Bool) {
@@ -111,6 +123,7 @@ final class CurrentModelWatcher {
         let models = self.models
         AX.queue.async { [weak self] in
             guard let self else { return }
+            if AX.hasQueuedAction { DispatchQueue.main.async { self.inFlight = false }; return } // A queued action runs next; this poll's pre-walk reads held a quick reasoning flick ~130 ms until its release cancelled it (2026-10-29 19:07:40). The timer polls again shortly.
             let selection: CurrentSelection?
             if let reader = self.customReader {
                 selection = reader(pid, models, force)
@@ -120,9 +133,13 @@ final class CurrentModelWatcher {
                     self.enabledWebAXForPID = pid
                 }
                 if let window = AX.focusedWindow(pid: pid) {
-                    let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: force)
-                    selection = CurrentModelMatcher.selection(
+                    let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: force,
+                                                        yieldsToActions: true) // Toolbar and Agentic Mouse actions must not wait behind this background walk.
+                    let read = CurrentModelMatcher.selection(
                         forButtonTitle: located.modelButton.map(AX.title) ?? "", among: models)
+                    selection = CurrentSelection(modelID: read.modelID, effort: read.effort,
+                                                 speedIconVisible: located.modelButton.map(CodexUI.showsSpeedIcon),
+                                                 savedSpeed: self.savedCodexSpeed()) // Part of the compared selection so a Fast↔Ultrafast change, which leaves the icon unchanged, still updates the bar.
                 } else {
                     selection = nil
                 }
@@ -147,6 +164,15 @@ final class CurrentModelWatcher {
                 if retry { self.poll(force: true) }
             }
         }
+    }
+
+    /// Codex's saved speed choice from its config, cached by modification date; nil when the file is unreadable.
+    private func savedCodexSpeed() -> ResponseSpeed? {
+        guard let modified = (try? FileManager.default.attributesOfItem(atPath: codexConfigURL.path))?[.modificationDate] as? Date else { return nil }
+        if let savedSpeedRead, savedSpeedRead.modified == modified { return savedSpeedRead.speed }
+        let speed = (try? String(contentsOf: codexConfigURL, encoding: .utf8)).flatMap(ResponseSpeed.init(codexConfig:))
+        savedSpeedRead = (modified, speed)
+        return speed
     }
 
     private func report(_ selection: CurrentSelection) {

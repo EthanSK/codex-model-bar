@@ -63,7 +63,7 @@
       <div class="feature-list">
         <div class="feature"><span class="feature-mark">01</span><div><h3>Follows the window</h3><p>The 30-point bar sits under Codex when there is room, moves above it when needed, and hides when Codex is in the background.</p></div></div>
         <div class="feature"><span class="feature-mark">02</span><div><h3>Fits your choices</h3><p>The strip fits its visible model buttons and a ticked reasoning slider. Right-click it to hide models you do not use, refresh the list, or change Open at login.</p></div></div>
-        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's controls</h3><p>Model buttons use Codex's <code>/model</code> menu. The reasoning slider uses your configured Codex shortcuts and checks each change. Both pause while you type.</p></div></div>
+        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's controls</h3><p>Model buttons use Codex's <code>/model</code> menu. The reasoning slider uses your configured Codex shortcuts. Both pause while you type.</p></div></div>
       </div>
     </section>
 
@@ -72,7 +72,7 @@
         <div><p class="eyebrow">Install from source</p><h2 id="install-title">Build it on your Mac.</h2><p>Requires macOS 13+, the Codex desktop app, and Xcode Command Line Tools. Grant Accessibility access to Codex Model Bar when macOS asks. Assign Codex shortcuts for increasing and decreasing reasoning effort to use the slider.</p><p class="setup-small">The repo provides source code. There is no public signed or notarized download yet.</p></div>
         <div class="command-block"><div class="command-header">Terminal <span>macOS</span></div><pre><code>git clone https://github.com/EthanSK/codex-model-bar.git
 cd codex-model-bar
-swift test
+swift test --scratch-path .build.noindex
 ./scripts/build-app.sh</code></pre><a href="https://github.com/EthanSK/codex-model-bar#install-from-source">Full setup and signing notes <span aria-hidden="true">↗</span></a></div>
       </div>
     </section>

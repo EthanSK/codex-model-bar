@@ -1,6 +1,54 @@
 import XCTest
 @testable import CodexModelBarCore
 
+final class StatusPlacementTests: XCTestCase {
+    func testNoticeStaysRightOfTheBarWithoutMovingIt() {
+        let screen = CGRect(x: -1700, y: -300, width: 1700, height: 1100)
+        for bar in [CGRect(x: -1450, y: 100, width: 700, height: 30),
+                    CGRect(x: -1450, y: 100, width: 180, height: 178)] {
+            let notice = BarPlacement.status(beside: bar, visibleFrame: screen,
+                                             contentSize: CGSize(width: 150, height: 26))
+            XCTAssertEqual(notice.minX, bar.maxX + 6)
+            XCTAssertEqual(notice.midY, bar.midY)
+            XCTAssertFalse(notice.intersects(bar))
+            XCTAssertTrue(screen.contains(notice))
+        }
+    }
+
+    func testRightScreenEdgeUsesSpaceAboveOrBelowWithoutCoveringTheSlider() {
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        for bar in [CGRect(x: 820, y: 100, width: 180, height: 178),
+                    CGRect(x: 820, y: 600, width: 180, height: 178)] {
+            let notice = BarPlacement.status(beside: bar, visibleFrame: screen,
+                                             contentSize: CGSize(width: 900, height: 26))
+            XCTAssertEqual(notice.width, 320)
+            XCTAssertEqual(notice.maxX, screen.maxX)
+            XCTAssertTrue(screen.contains(notice))
+            XCTAssertFalse(notice.intersects(bar))
+        }
+    }
+
+    func testLimitedRightSpaceTruncatesOnlyTheNotice() {
+        let notice = BarPlacement.status(beside: CGRect(x: 200, y: 200, width: 680, height: 30),
+                                         visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 800),
+                                         contentSize: CGSize(width: 280, height: 26))
+        XCTAssertEqual(notice.minX, 886)
+        XCTAssertEqual(notice.width, 114)
+    }
+
+    func testNoticeAvoidsCodexAndFlowWhenBothUsualSidesAreBlocked() {
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let bar = CGRect(x: 10, y: 100, width: 200, height: 200)
+        let codex = CGRect(x: 230, y: 0, width: 600, height: 800)
+        let flow = CGRect(x: 0, y: 300, width: 220, height: 500)
+        let notice = BarPlacement.status(beside: bar, visibleFrame: screen,
+                                         contentSize: CGSize(width: 150, height: 26),
+                                         obstructingWindows: [codex, flow])
+        for obstacle in [bar, codex, flow] { XCTAssertFalse(notice.intersects(obstacle)) }
+        XCTAssertTrue(screen.contains(notice))
+    }
+}
+
 /// The real catalogue seen on Codex desktop 26.917 (model/list), used as fixtures.
 private let catalogue: [CodexModel] = [
     CodexModel(id: "gpt-6-astra", displayName: "GPT-6-Astra"),
@@ -146,48 +194,231 @@ final class CodexModelParsingTests: XCTestCase {
             """.utf8)
         XCTAssertEqual(try JSONDecoder().decode([CodexModel].self, from: old).first?.supportedEfforts, [])
     }
+
+    func testSpeedTiersFromBothCatalogueSourcesAndOlderSavedModels() throws {
+        let result: [String: Any] = ["data": [
+            ["model": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "additionalSpeedTiers": ["fast", "ultrafast"]],
+            ["model": "claude-opus-5-5", "displayName": "Opus 5.5", "additionalSpeedTiers": [String]()],
+        ]]
+        XCTAssertEqual(CodexModelParsing.parseModelListResult(result).models.map(\.speedTiers), [[.fast, .ultrafast], []])
+        let cache = Data("""
+            {"models":[{"slug":"gpt-6.1-terra","display_name":"GPT-6.1 Terra","additional_speed_tiers":["fast"]},
+                       {"slug":"gpt-5.5","display_name":"GPT-5.5"}]}
+            """.utf8)
+        XCTAssertEqual(CodexModelParsing.parseModelsCache(cache).map(\.speedTiers), [[.fast], []])
+        let saved = CodexModel(id: "gpt-6.1-sol", displayName: "GPT-6.1-Sol", speedTiers: [.fast, .ultrafast])
+        XCTAssertEqual(try JSONDecoder().decode(CodexModel.self, from: JSONEncoder().encode(saved)), saved)
+        let old = Data(#"[{"id":"gpt-6-sol","displayName":"GPT-6-Sol","description":"","hidden":false}]"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode([CodexModel].self, from: old).first?.speedTiers, [])
+    }
 }
 
 final class BarPlacementTests: XCTestCase {
-    private let screen = CGRect(x: 0, y: 0, width: 2056, height: 1329)
-    private let visible = CGRect(x: 0, y: 70, width: 2056, height: 1226)   // Dock below, menu bar above
+    private let visible = CGRect(x: 0, y: 70, width: 2056, height: 1226)
+    private let size = CGSize(width: 142, height: 216)
+    private let codex = CGRect(x: 100, y: 400, width: 1400, height: 700)
 
-    func testBelowWhenThereIsRoom() {
-        // Ethan's real window: CG bounds 120,212,1818×985 on a 1329pt-high display.
+    func testRightOfFlowCannotCoverTheCodexWindow() {
+        let flow = CGRect(x: 200, y: 200, width: 1100, height: 700)
+        let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)
+        let oldAnchor = CGRect(x: flow.maxX + 4, y: flow.midY - size.height / 2,
+                               width: size.width, height: size.height)
+        XCTAssertTrue(oldAnchor.intersects(codex), "The previous right-only anchor reproduces the reported obstruction")
+        XCTAssertFalse(result.intersects(codex))
+        XCTAssertFalse(result.intersects(flow))
+        XCTAssertTrue(visible.contains(result))
+        XCTAssertEqual(result.size, size)
+    }
+
+    func testMovingCodexRecomputesClearSpaceBesideFlow() {
+        let flow = CGRect(x: 200, y: 200, width: 1100, height: 700)
+        let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)
+        let moved = BarPlacement.place(window: codex.offsetBy(dx: 900, dy: 100), visibleFrame: visible,
+                                       contentSize: size, agentFlowHUD: flow)
+        XCTAssertNotEqual(result, moved)
+        XCTAssertFalse(result.intersects(codex))
+        XCTAssertFalse(moved.intersects(codex.offsetBy(dx: 900, dy: 100)))
+        XCTAssertFalse(moved.intersects(flow))
+        XCTAssertTrue(visible.contains(moved))
+    }
+
+    func testMovingAndGrowingFlowKeepsTheRailClearOfBothWindows() {
+        for flow in [CGRect(x: 200, y: 170, width: 1000, height: 160),
+                     CGRect(x: 100, y: 170, width: 1100, height: 500),
+                     CGRect(x: 200, y: 170, width: 1100, height: 1000)] {
+            let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)
+            XCTAssertFalse(result.intersects(codex))
+            XCTAssertFalse(result.intersects(flow))
+            XCTAssertTrue(visible.contains(result))
+        }
+    }
+
+    func testBottomFlushFlowBelowTheDockKeepsTheWholeRailOnScreen() {
+        let flow = CGRect(x: visible.maxX - 400, y: 0, width: 400, height: 100)
+        let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)
+        XCTAssertFalse(result.intersects(codex))
+        XCTAssertFalse(result.intersects(flow))
+        XCTAssertTrue(visible.contains(result))
+    }
+
+    func testPartlyOffscreenFlowKeepsTheRailReachableAtEveryEdge() {
+        for flow in [CGRect(x: -1400, y: 200, width: 900, height: 800),
+                     CGRect(x: 2000, y: 200, width: 900, height: 800),
+                     CGRect(x: 100, y: -800, width: 900, height: 900),
+                     CGRect(x: 100, y: 1200, width: 900, height: 900)] {
+            let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)
+            XCTAssertTrue(visible.contains(result))
+            XCTAssertFalse(result.intersects(codex))
+            XCTAssertFalse(result.intersects(flow))
+            XCTAssertEqual(result.size, size)
+        }
+    }
+
+    func testFlowOnAnotherDisplayUsesThatDisplaysCoordinates() {
+        let display = visible.offsetBy(dx: -2056, dy: 200)
+        let flow = CGRect(x: -1800, y: 500, width: 1100, height: 600)
+        let result = BarPlacement.place(window: codex, visibleFrame: display, contentSize: size, agentFlowHUD: flow)
+        XCTAssertFalse(result.intersects(codex))
+        XCTAssertFalse(result.intersects(flow))
+        XCTAssertTrue(display.contains(result))
+    }
+
+    func testNoFlowRestoresOriginalBelowCodexStrip() {
+        let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30))
+        XCTAssertEqual(result.minY, codex.minY - 30)
+        XCTAssertEqual(result.midX, codex.midX)
+    }
+
+    func testNoFlowAtTheDockKeepsOriginalAboveCodexStrip() {
+        let window = CGRect(x: 100, y: visible.minY, width: 1400, height: 700)
+        let result = BarPlacement.place(window: window, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30))
+        XCTAssertEqual(result.minY, window.maxY)
+    }
+
+    func testFilledScreenRetainsTheVisibleTopEdgeLastResort() {
+        let result = BarPlacement.place(window: visible, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30))
+        XCTAssertEqual(result.maxY, visible.maxY - 6)
+        XCTAssertTrue(visible.contains(result))
+    }
+
+    func testOversizedRailIsClampedToTheVisibleScreen() {
+        let result = BarPlacement.place(window: codex, visibleFrame: visible,
+                                        contentSize: CGSize(width: 3000, height: 2000), agentFlowHUD: visible)
+        XCTAssertEqual(result, visible)
+    }
+
+    func testSwitchesToFlowsLeftWhenCodexBlocksTheRightSide() {
+        let screen = CGRect(x: 0, y: 0, width: 1400, height: 900)
+        let window = CGRect(x: 750, y: 0, width: 650, height: 900)
+        let flow = CGRect(x: 250, y: 0, width: 500, height: 900)
+        let result = BarPlacement.place(window: window, visibleFrame: screen,
+                                        contentSize: CGSize(width: 140, height: 100), agentFlowHUD: flow)
+        XCTAssertLessThanOrEqual(result.maxX, flow.minX - 4)
+        XCTAssertFalse(result.intersects(window))
+        XCTAssertTrue(screen.contains(result))
+    }
+
+    func testNearbyWrappedControlsBeatADistantHorizontalRowAboveCodex() {
+        let flow = CGRect(x: 200, y: 200, width: 1500, height: 700)
+        let natural = CGSize(width: 700, height: 30)
+        let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: natural,
+                                        agentFlowHUD: flow, contentSizeForWidth: { width in
+            width >= 700 ? natural : CGSize(width: 230, height: 120)
+        })
+        XCTAssertEqual(result.size, CGSize(width: 230, height: 120))
+        XCTAssertEqual(result.maxY, codex.minY)
+        XCTAssertFalse(result.intersects(codex))
+        XCTAssertFalse(result.intersects(flow))
+    }
+
+    func testScreenshotLayoutUsesSpaceRightOfFlowBelowCodexInsteadOfTheTop() {
+        let screen = CGRect(x: 0, y: 0, width: 2056, height: 1290)
+        let window = CGRect(x: 120, y: 130, width: 1818, height: 1090)
+        let flow = CGRect(x: 420, y: 25, width: 950, height: 135)
+        let natural = CGSize(width: 785, height: 30)
+        let result = BarPlacement.place(window: window, visibleFrame: screen, contentSize: natural,
+                                        agentFlowHUD: flow, contentSizeForWidth: { width in
+            width >= 785 ? natural : CGSize(width: 550, height: 70)
+        })
+        XCTAssertEqual(result.maxY, window.minY)
+        XCTAssertGreaterThanOrEqual(result.minX, flow.maxX + 4)
+        XCTAssertEqual(result.size, CGSize(width: 550, height: 70))
+        XCTAssertTrue(screen.contains(result))
+        XCTAssertFalse(result.intersects(window))
+        XCTAssertFalse(result.intersects(flow))
+    }
+
+    func testBottomSideSpaceWinsEvenWhenTheOriginalStripWouldBeAboveCodex() {
+        let screen = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        let window = CGRect(x: 100, y: 20, width: 850, height: 700)
+        let natural = CGSize(width: 700, height: 30)
+        let result = BarPlacement.place(window: window, visibleFrame: screen, contentSize: natural,
+                                        contentSizeForWidth: { width in
+            width >= 700 ? natural : CGSize(width: 230, height: 120)
+        })
+        XCTAssertGreaterThanOrEqual(result.minX, window.maxX)
+        XCTAssertEqual(result.minY, screen.minY)
+        XCTAssertFalse(result.intersects(window))
+    }
+
+    func testKeepsHorizontalControlsWhenTheyFitInTheSameBottomBand() {
+        let screen = CGRect(x: 0, y: 0, width: 2056, height: 1290)
+        let window = CGRect(x: 120, y: 200, width: 1818, height: 950)
+        let flow = CGRect(x: 500, y: 25, width: 600, height: 200)
+        let natural = CGSize(width: 700, height: 30)
+        let result = BarPlacement.place(window: window, visibleFrame: screen, contentSize: natural,
+                                        agentFlowHUD: flow, contentSizeForWidth: { width in
+            width >= 700 ? natural : CGSize(width: 230, height: 120)
+        })
+        XCTAssertEqual(result.size, natural)
+        XCTAssertEqual(result.maxY, window.minY)
+        XCTAssertGreaterThanOrEqual(result.minX, flow.maxX + 4)
+    }
+
+    func testWrapsOnlyWhenEveryClearRegionIsTooNarrowForOneRow() {
+        let screen = CGRect(x: 0, y: 0, width: 1400, height: 900)
+        let window = CGRect(x: 700, y: 0, width: 700, height: 900)
+        let flow = CGRect(x: 250, y: 0, width: 450, height: 900)
+        let natural = CGSize(width: 700, height: 30)
+        let result = BarPlacement.place(window: window, visibleFrame: screen, contentSize: natural,
+                                        agentFlowHUD: flow, contentSizeForWidth: { width in
+            width >= 700 ? natural : CGSize(width: 230, height: 120)
+        })
+        XCTAssertEqual(result.size, CGSize(width: 230, height: 120))
+        XCTAssertFalse(result.intersects(window))
+        XCTAssertFalse(result.intersects(flow))
+        XCTAssertTrue(screen.contains(result))
+    }
+
+    func testAvoidsOtherFlowPanelsAsWellAsTheSelectedHud() {
+        let screen = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let window = CGRect(x: 200, y: 250, width: 1000, height: 500)
+        let flow = CGRect(x: 200, y: 0, width: 1000, height: 250)
+        let other = CGRect(x: 1200, y: 0, width: 400, height: 900)
+        let result = BarPlacement.place(window: window, visibleFrame: screen,
+                                        contentSize: CGSize(width: 300, height: 30), agentFlowHUD: flow,
+                                        obstructingWindows: [flow, other])
+        for obstacle in [window, flow, other] { XCTAssertFalse(result.intersects(obstacle)) }
+        XCTAssertTrue(screen.contains(result))
+    }
+
+    func testMovingFlowAcrossTheScreenNeverCoversEitherWindowWhenSpaceExists() {
+        for x in stride(from: -200, through: 2200, by: 200) {
+            for y in stride(from: -200, through: 1400, by: 200) {
+                let flow = CGRect(x: x, y: y, width: 500, height: 300)
+                let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size,
+                                                agentFlowHUD: flow)
+                XCTAssertTrue(visible.contains(result), "Flow at \(flow)")
+                XCTAssertFalse(result.intersects(codex), "Flow at \(flow)")
+                XCTAssertFalse(result.intersects(flow), "Flow at \(flow)")
+            }
+        }
+    }
+
+    func testWindowServerCoordinatesStillConvertToCocoaCoordinates() {
         let window = CoordinateConversion.cocoaRect(fromCGBounds: CGRect(x: 120, y: 212, width: 1818, height: 985),
-                                                    primaryScreenHeight: screen.height)
+                                                    primaryScreenHeight: 1329)
         XCTAssertEqual(window, CGRect(x: 120, y: 132, width: 1818, height: 985))
-        let result = BarPlacement.place(window: window, visibleFrame: visible, height: 30, contentWidth: 700)
-        XCTAssertEqual(result.slot, .below)
-        XCTAssertEqual(result.frame, CGRect(x: 679, y: 102, width: 700, height: 30))
-    }
-
-    func testAboveWhenWindowTouchesTheDock() {
-        let window = CGRect(x: 100, y: 70, width: 1200, height: 900)
-        let result = BarPlacement.place(window: window, visibleFrame: visible, height: 30, contentWidth: 700)
-        XCTAssertEqual(result.slot, .above)
-        XCTAssertEqual(result.frame, CGRect(x: 350, y: 970, width: 700, height: 30))
-    }
-
-    func testInsideTopWhenMaximised() {
-        let result = BarPlacement.place(window: visible, visibleFrame: visible, height: 30, contentWidth: 700)
-        XCTAssertEqual(result.slot, .insideTop)
-        XCTAssertEqual(result.frame.width, 700)
-        XCTAssertEqual(result.frame.midX, visible.midX)
-        XCTAssertEqual(result.frame.maxY, visible.maxY - 6)
-    }
-
-    func testBarNeverWiderThanWindow() {
-        let small = CGRect(x: 0, y: 70, width: 500, height: 1226)
-        let result = BarPlacement.place(window: small, visibleFrame: visible, height: 30, contentWidth: 700)
-        XCTAssertEqual(result.frame.width, 500)
-    }
-
-    func testBarStaysOnScreenWhenCodexWindowIsPartlyOffScreen() {
-        let window = CGRect(x: -200, y: 120, width: 900, height: 800)
-        let result = BarPlacement.place(window: window, visibleFrame: visible, height: 30, contentWidth: 600)
-        XCTAssertEqual(result.frame.minX, visible.minX)
-        XCTAssertEqual(result.frame.width, 600)
     }
 }
 

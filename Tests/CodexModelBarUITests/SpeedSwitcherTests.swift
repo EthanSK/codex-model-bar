@@ -4,59 +4,97 @@ import XCTest
 import CodexModelBarCore
 
 final class SpeedSwitcherTests: XCTestCase {
-    func testStandardDiscoveryUsesOneUnicodeKeyPair() throws {
-        for text in ["/"] {
-            let events = try XCTUnwrap(Keyboard.textEvents(text))
-            XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp])
-            for event in events {
-                var length = 0
-                var units = [UniChar](repeating: 0, count: 32)
-                event.keyboardGetUnicodeString(maxStringLength: units.count, actualStringLength: &length, unicodeString: &units)
-                XCTAssertEqual(String(utf16CodeUnits: units, count: length), text)
-            }
+    func testPostedTextAndHIDReturnDoNotCancelReturningToTheTypingInput() throws {
+        for event in try XCTUnwrap(SpeedCommandPaste.events("/ultrafast")) {
+            XCTAssertFalse(SpeedSwitcher.isExternalInput(event))
         }
     }
 
-    func testPasteShortcutAndReturnMatchAgentFlowInputSources() throws {
-        let events = try XCTUnwrap(SpeedCommandPaste.events())
-        XCTAssertEqual(events.map { $0.getIntegerValueField(.keyboardEventKeycode) }, [55, 9, 9, 55, 36, 36])
-        XCTAssertEqual(events.map(\.type), [.flagsChanged, .keyDown, .keyUp, .flagsChanged, .keyDown, .keyUp])
-        XCTAssertEqual(events.map(\.flags), [.maskCommand, .maskCommand, .maskCommand, [], [], []])
+    func testNewExternalKeysAndClicksCancelTheBorrowedFocus() throws {
+        for type in [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown] {
+            let event = try XCTUnwrap(CGEvent(source: nil))
+            event.type = type
+            event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+            XCTAssertTrue(SpeedSwitcher.isExternalInput(event))
+        }
+        XCTAssertTrue(SpeedSwitcher.isExternalInput(nil))
+    }
+
+    func testCompleteUnicodeCommandAndHIDReturnNeverSendCommandV() throws {
+        let events = try XCTUnwrap(SpeedCommandPaste.events("/ultrafast"))
+        XCTAssertEqual(events.map { $0.getIntegerValueField(.keyboardEventKeycode) }, [0, 0, 36, 36])
+        XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp, .keyDown, .keyUp])
+        XCTAssertEqual(events.map(\.flags), [[], [], [], []])
+        for event in events.prefix(2) {
+            var count = 0
+            event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &count, unicodeString: nil)
+            var units = [UniChar](repeating: 0, count: count)
+            event.keyboardGetUnicodeString(maxStringLength: units.count, actualStringLength: &count, unicodeString: &units)
+            XCTAssertEqual(String(decoding: units, as: UTF16.self), " /ultrafast")
+        }
         let privateStateID = try XCTUnwrap(events.first).getIntegerValueField(.eventSourceStateID)
         XCTAssertNotEqual(privateStateID, Int64(CGEventSourceStateID.hidSystemState.rawValue))
         XCTAssertNotEqual(privateStateID, Int64(CGEventSourceStateID.combinedSessionState.rawValue))
-        XCTAssertEqual(events.prefix(4).map { $0.getIntegerValueField(.eventSourceStateID) },
-                       Array(repeating: privateStateID, count: 4)) // macOS assigns each private source its own identifier; Command itself produces flagsChanged events.
+        XCTAssertEqual(events.prefix(2).map { $0.getIntegerValueField(.eventSourceStateID) },
+                       Array(repeating: privateStateID, count: 2))
         XCTAssertEqual(events.suffix(2).map { $0.getIntegerValueField(.eventSourceStateID) },
                        Array(repeating: Int64(CGEventSourceStateID.hidSystemState.rawValue), count: 2))
     }
 
-    func testPasteKeepsTheCommandAvailableToALaggingReader() {
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
-        board.setString("old clipboard", forType: .string)
-        board.setData(Data([1, 2]), forType: .rtf)
-        XCTAssertTrue(SpeedCommandPaste.prepare("/ultrafast", on: board))
-        XCTAssertEqual(board.string(forType: .string), " /ultrafast")
-        XCTAssertNil(board.data(forType: .rtf))
-        let payloadStays = expectation(description: "Payload stays for delayed paste")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(board.string(forType: .string), " /ultrafast")
-            board.clearContents()
-            board.setString("newer user copy", forType: .string)
-            payloadStays.fulfill()
-        }
-        wait(for: [payloadStays], timeout: 1)
-        XCTAssertEqual(board.string(forType: .string), "newer user copy")
+    func testSuccessfulTextDeliveryDoesNotTouchTheUserClipboard() {
+        let changeCount = NSPasteboard.general.changeCount
+        var sent: [CGEvent] = []
+        var waits: [useconds_t] = []
+        XCTAssertTrue(SpeedCommandPaste.post("/ultrafast", canPost: { true },
+                                            send: { sent.append($0) }, wait: { waits.append($0) }))
+        XCTAssertEqual(sent.count, 4)
+        XCTAssertEqual(waits, [100_000, 10_000, 100_000, 30_000])
+        XCTAssertEqual(NSPasteboard.general.changeCount, changeCount)
     }
 
-    func testCancelledPasteDoesNotChangeTheUserClipboard() {
+    func testCancelledTextDoesNotChangeTheUserClipboard() {
         let changeCount = NSPasteboard.general.changeCount
         XCTAssertFalse(SpeedCommandPaste.post("/fast", canPost: { false }))
         XCTAssertEqual(NSPasteboard.general.changeCount, changeCount)
     }
 
-    func testSpeedPasteMatchesCodexInlineCommandBoundaryWithExistingDrafts() throws {
+    func testLostFocusSuppressesReturnButStillReleasesTheTextKey() {
+        var allowed = true
+        var sent: [CGEvent] = []
+        XCTAssertFalse(SpeedCommandPaste.post("/fast", canPost: { allowed },
+                                             send: { sent.append($0); allowed = false }, wait: { _ in }))
+        XCTAssertEqual(sent.map(\.type), [.keyDown, .keyUp])
+        XCTAssertEqual(sent.map { $0.getIntegerValueField(.keyboardEventKeycode) }, [0, 0])
+    }
+
+    func testEachToggleWaitsAfterFocusAndBeforeOneReturn() {
+        for command in ["/fast", "/ultrafast"] {
+            for _ in 0..<2 { // The second identical command is the requested toggle OFF.
+                var sequence: [String] = []
+                XCTAssertTrue(SpeedCommandPaste.post(command, canPost: { true }, send: {
+                    sequence.append("\($0.getIntegerValueField(.keyboardEventKeycode)):\($0.type.rawValue)")
+                }, wait: { sequence.append("wait:\($0)") }))
+                XCTAssertEqual(sequence, ["wait:100000", "0:10", "wait:10000", "0:11", "wait:100000",
+                                          "36:10", "wait:30000", "36:11"],
+                               "Focus settles before one whole command and one Enter, without a result check or retry")
+            }
+        }
+    }
+
+    func testLosingKeyboardOwnershipDuringFocusDelaySendsNothing() {
+        var allowed = true
+        var waits: [useconds_t] = []
+        var sent: [CGEvent] = []
+        XCTAssertFalse(SpeedCommandPaste.post("/ultrafast", canPost: { allowed },
+                                             send: { sent.append($0) }, wait: {
+            waits.append($0)
+            allowed = false
+        }))
+        XCTAssertEqual(waits, [100_000])
+        XCTAssertTrue(sent.isEmpty, "Do not type into a different app if focus changes during the settling delay")
+    }
+
+    func testSpeedTextMatchesCodexInlineCommandBoundaryWithExistingDrafts() throws {
         // The installed Codex composer's actual suggestion pattern (Fj/Uj).
         // Its match is on text BEFORE the caret; the suggestion consumes only
         // the trigger and query, not the draft or the separating whitespace.
@@ -76,43 +114,55 @@ final class SpeedSwitcherTests: XCTestCase {
                      "The reported old concatenation must reproduce a missing command suggestion")
     }
 
-    func testPasteAtMiddleCaretPreservesTheFollowingDraftText() throws {
+    func testTextAtMiddleCaretPreservesTheFollowingDraftText() throws {
         let beforeCaret = "review", afterCaret = " the changes"
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
         for command in ["/fast", "/ultrafast"] {
-            XCTAssertTrue(SpeedCommandPaste.prepare(command, on: board))
-            let payload = try XCTUnwrap(board.string(forType: .string))
+            let payload = SpeedCommandPaste.payload(command)
             XCTAssertEqual(beforeCaret + payload + afterCaret,
                            "review " + command + " the changes")
         }
     }
 
-    func testReleaseCancelsBothQueuedRatchetsWithoutEnteringTheApp() {
-        let switcher = SpeedSwitcher()
+    func testQuickReleasePreservesFirstRatchetButCancelsLaterQueuedWork() {
+        var performed = 0
+        let switcher = SpeedSwitcher(performer: { request, _, _, isCurrent in
+            XCTAssertTrue(isCurrent())
+            guard case .command(.ultrafast) = request else {
+                XCTFail("Only the first ratchet may run")
+                return .cancelled
+            }
+            performed += 1
+            return .requested(.ultrafast) // Inert sink: never focus or type in a real app.
+        })
         let barrier = DispatchSemaphore(value: 0)
         AX.queue.async { barrier.wait() }
-        let cancelled = expectation(description: "Both queued commands cancel")
-        cancelled.expectedFulfillmentCount = 2
-        for speed in [ResponseSpeed.ultrafast, .fast] {
-            switcher.change(.command(speed), allModels: [], codex: .current) { result in
-                guard case .cancelled = result else { return XCTFail("Must cancel before any app interaction: \(result)") }
-                cancelled.fulfill()
-            }
+        let completed = expectation(description: "First command finishes, later queue cancels")
+        completed.expectedFulfillmentCount = 2
+        switcher.change(.command(.ultrafast), codex: .current) { result in
+            guard case .requested(.ultrafast) = result else { return XCTFail("Quick release lost the first ratchet: \(result)") }
+            completed.fulfill()
+        }
+        switcher.change(.command(.fast), codex: .current) { result in
+            guard case .cancelled = result else { return XCTFail("Later queued ratchet must cancel: \(result)") }
+            completed.fulfill()
         }
         XCTAssertTrue(switcher.isBusy)
         switcher.cancelMouseCommands()
         barrier.signal()
-        wait(for: [cancelled], timeout: 2)
+        wait(for: [completed], timeout: 2)
+        XCTAssertEqual(performed, 1)
         XCTAssertFalse(switcher.isBusy)
     }
 
     func testOldQueuedRatchetExpiresWithoutEnteringTheApp() {
-        let switcher = SpeedSwitcher()
+        let switcher = SpeedSwitcher(performer: { _, _, _, _ in
+            XCTFail("Even the reserved first ratchet must expire before app interaction")
+            return .requested(.fast)
+        })
         let barrier = DispatchSemaphore(value: 0)
         AX.queue.async { barrier.wait() }
         let expired = expectation(description: "Stale command cancels")
-        switcher.change(.command(.fast), allModels: [], codex: .current) { result in
+        switcher.change(.command(.fast), codex: .current) { result in
             guard case .cancelled = result else { return XCTFail("Must expire before any app interaction: \(result)") }
             expired.fulfill()
         }

@@ -45,13 +45,14 @@ final class ReasoningDragTests: XCTestCase {
     }
 
     private func makeBar() -> BarView {
-        let bar = BarView(frame: NSRect(x: 0, y: 0, width: 600, height: BarView.height))
+        let bar = BarView(frame: .zero)
         let models = ["main", "other"].map {
             CodexModel(id: $0, displayName: $0, supportedEfforts: ["low", "high", "max"])
         }
         bar.setCatalogModels(models)
         bar.setModels(models)
         bar.setCurrentSelection(CurrentSelection(modelID: "main", effort: "low"))
+        bar.frame.size = bar.preferredSize
         bar.layoutSubtreeIfNeeded()
         return bar
     }

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import os
 
 /// Thin, synchronous helpers over the macOS Accessibility (AX) C API.
 ///
@@ -12,7 +13,23 @@ import ApplicationServices
 /// main thread (a full tree walk takes ~0.5 s on a busy chat).
 enum AX {
     /// Serial queue for every AX call, so tree walks never overlap or block the UI.
-    static let queue = DispatchQueue(label: "com.ethansk.codex-model-bar.ax", qos: .userInitiated)
+    static let queue = DispatchQueue(label: "com.ethansk.codex-model-bar.ax", qos: .userInitiated,
+                                    autoreleaseFrequency: .workItem) // Drain Cocoa/AX temporary objects after each read, including on this long-lived serial queue.
+
+    private static let queuedActions = OSAllocatedUnfairLock(initialState: 0) // Incremented by the queuing thread, decremented on `queue` when the action starts, read by background walks; hence the lock.
+
+    /// True while a speed, reasoning or model action waits for `queue`; the background composer poll stops its walk early.
+    static var hasQueuedAction: Bool { queuedActions.withLock { $0 > 0 } }
+
+    /// Queues a user action so the background composer poll yields to it instead of making it wait behind a whole-window walk.
+    /// On 2026-10-28 a reasoning gesture waited 4.4 s behind one poll walk and was cancelled when it finally ran.
+    static func enqueueAction(_ work: @escaping () -> Void) {
+        queuedActions.withLock { $0 += 1 }
+        queue.async {
+            queuedActions.withLock { $0 -= 1 }
+            work()
+        }
+    }
 
     /// True when this app may use Accessibility (needed to read Codex and send keys).
     static var isTrusted: Bool { AXIsProcessTrusted() }

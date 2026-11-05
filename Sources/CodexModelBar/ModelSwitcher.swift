@@ -77,37 +77,15 @@ final class ModelSwitcher {
 
         let pid = codex.processIdentifier
         let requestedAt = ProcessInfo.processInfo.systemUptime
-        AX.queue.async {
+        AX.enqueueAction {
             Log.info("model-switch attempt=\(attempt) phase=start pid=\(pid) target=\(target.id)")
             guard !Keyboard.userInteracted(since: requestedAt) else {
                 finish(.cancelledForTyping)
                 return
             }
-            if codex.isActive, let owner = AX.keyboardOwnerPID(), owner != pid {
-                // Agent Flow's non-activating typing panel can own keys while Codex
-                // stays active. Native testing proved reactivating Codex alone does
-                // nothing; activating our accessory first releases that panel's key
-                // ownership without closing it or changing the typing route.
-                Log.info("model-switch attempt=\(attempt) phase=release-panel-keyboard owner=\(owner)")
-                DispatchQueue.main.sync { NSApp.activate(ignoringOtherApps: true) }
-                guard Self.waitUntil(timeout: 0.6, { NSRunningApplication.current.isActive }) else {
-                    finish(.failed("could not release the floating panel's keyboard focus"))
-                    return
-                }
-            }
-            guard !Keyboard.userInteracted(since: requestedAt) else {
-                finish(.cancelledForTyping)
-                return
-            }
-            DispatchQueue.main.sync { _ = codex.activate() }
-            guard Self.waitUntil(timeout: 1.0, { codex.isActive && AX.keyboardOwnerPID() == pid }) else {
-                Log.info("model-switch attempt=\(attempt) phase=finish result=inactive")
-                finish(.failed("Codex did not receive keyboard focus"))
-                return
-            }
             AX.enableWebAccessibility(pid: pid)
             let started = Date()
-            let result = Self.performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt,
+            let result = Self.performSwitch(to: target, allModels: allModels, codex: codex, attempt: attempt,
                                            enableUltrafast: enableUltrafast)
             Log.info("model-switch attempt=\(attempt) phase=finish target=\(target.id) result=\(result) elapsed=\(String(format: "%.2f", Date().timeIntervalSince(started)))s")
             finish(result)
@@ -116,8 +94,9 @@ final class ModelSwitcher {
 
     // MARK: - Steps (all on AX.queue)
 
-    private static func performSwitch(to target: CodexModel, allModels: [CodexModel], pid: pid_t,
+    private static func performSwitch(to target: CodexModel, allModels: [CodexModel], codex: NSRunningApplication,
                                       attempt: String, retriesRemaining: Int = 1, enableUltrafast: Bool = false) -> Result {
+        let pid = codex.processIdentifier
         // Step 1: current model and message box.
         let switchStartedAt = ProcessInfo.processInfo.systemUptime
         guard let window = AX.focusedWindow(pid: pid) else { return .failed("no Codex window") }
@@ -141,6 +120,16 @@ final class ModelSwitcher {
             return .failed("model button or message box not found (no chat composer on screen?)")
         }
         Log.info("model-switch attempt=\(attempt) phase=located composer=\(CodexUI.identity(composer)) button=\(CodexUI.identity(button)) scopes=[\(located.scopeAncestors.map(CodexUI.identity).joined(separator: ","))]")
+        func canFocus() -> Bool {
+            !Keyboard.userInteracted(since: switchStartedAt)
+                && AX.focusedWindow(pid: pid).map { CFEqual($0, window) } == true
+                && AX.role(composer) == kAXTextAreaRole as String
+        }
+        guard canFocus(), SpeedInputFocus.activate(codex, canFocus: canFocus),
+              SpeedInputFocus.focus(composer, pid: pid, placeCaret: false, timeout: 0.6,
+                                    canFocus: { canFocus() && codex.isActive }) else {
+            return .failed("Could not focus the task composer")
+        } // Resolve the intended pane before activation; reuse speed/reasoning's focus write without moving the draft selection (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
         if current.modelID == target.id {
             if enableUltrafast { return selectUltrafast(original: located, window: window, pid: pid, models: allModels, selection: current, since: switchStartedAt) }
@@ -173,7 +162,7 @@ final class ModelSwitcher {
         // Allow the opened menu to settle before selecting; the existing live-menu
         // and focus checks below still protect the draft.
         let readyAt = ProcessInfo.processInfo.systemUptime
-        usleep(37_500)
+        usleep(SpeedCommandPaste.commandStepDelay) // All toolbar text routes use the same 100 ms after input focus; keep the model menu's own typing route (Ethan, 2026-10-31).
         guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }
 
         // Always use the previously working typed search. Ethan rejected picker
@@ -192,7 +181,7 @@ final class ModelSwitcher {
         let searchStartedAt = ProcessInfo.processInfo.systemUptime
         var typed = ""
         let retryAfterPanelLoss: (() -> Result)? = retriesRemaining > 0 ? {
-            performSwitch(to: target, allModels: allModels, pid: pid, attempt: attempt, retriesRemaining: 0,
+            performSwitch(to: target, allModels: allModels, codex: codex, attempt: attempt, retriesRemaining: 0,
                           enableUltrafast: enableUltrafast)
         } : nil
         for character in query {
@@ -297,6 +286,7 @@ final class ModelSwitcher {
         let query = "/ultrafast"
         func inspectCommand() -> (AXUIElement, SpeedCommandState)? {
             guard sameComposer(), CodexUI.composerText(composer) == before else { return nil }
+            usleep(SpeedCommandPaste.commandStepDelay) // The combined model/speed action also lets its focused input settle before each command it types (Ethan, 2026-10-31).
             var typed = ""
             for character in query {
                 guard !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid),
@@ -307,6 +297,7 @@ final class ModelSwitcher {
                 typed.append(character)
                 usleep(8_000)
             }
+            usleep(37_500) // Keep the same post-typing gap as ordinary model search before this path can press Return (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
             return poll(timeout: 1.5) {
                 guard sameComposer(), ComposerText.cleanupState(query, before: before, after: CodexUI.composerText(composer)) == .remaining else { return nil }
                 return CodexUI.ultrafastCommand(near: composer)
@@ -445,8 +436,8 @@ final class ModelSwitcher {
         let app = AXUIElementCreateApplication(pid)
         if let focused: AXUIElement = AX.attribute(app, kAXFocusedUIElementAttribute),
            AX.role(focused) == kAXTextAreaRole as String { return false }
-        AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        return waitUntil(timeout: 0.6) { isFocused(composer, pid: pid) }
+        return SpeedInputFocus.focus(composer, pid: pid, placeCaret: false, timeout: 0.6,
+                                     canFocus: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid })
     }
 
     private static func isFocused(_ element: AXUIElement, pid: pid_t) -> Bool {

@@ -4,14 +4,14 @@ import CodexModelBarCore
 
 /// Wires everything together:
 ///  - `CodexWindowTracker` tells us where the Codex window is and whether Codex is in front,
-///  - `BarPanel`/`BarView` draw the strip of model buttons under that window,
+///  - `BarPanel`/`BarView` draw the toolbar under Codex or beside the floating Flow HUD,
 ///  - `ModelCatalogService` supplies the model list,
 ///  - `CurrentModelWatcher` highlights the open chat's model,
 ///  - `ModelSwitcher` performs a switch when a button is clicked.
 final class AppController: NSObject, NSApplicationDelegate {
     private let tracker = CodexWindowTracker()
     private let panel = BarPanel()
-    private let barView = BarView(frame: NSRect(x: 0, y: 0, width: 600, height: BarView.height))
+    private let barView = BarView(frame: .zero)
     private let catalog = ModelCatalogService()
     private let watcher = CurrentModelWatcher()
     private let switcher = ModelSwitcher()
@@ -24,9 +24,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var cacheWatchTimer: Timer?
     private var lastCodexCacheModification: Date?
     private var trustTimer: Timer?
+    private var lastToolbarVisibilityContext: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("startup version=\(AppInfo.version) build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "dev") pid=\(ProcessInfo.processInfo.processIdentifier)")
+        Log.resourcesIfNeeded()
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
         barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
@@ -46,6 +48,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         lastCodexCacheModification = catalog.codexCacheModificationDate
         cacheWatchTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self else { return }
+            Log.resourcesIfNeeded()
             let modified = self.catalog.codexCacheModificationDate
             guard modified != self.lastCodexCacheModification else { return }
             self.lastCodexCacheModification = modified
@@ -58,15 +61,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         watcher.onChange = { [weak self] selection in
-            self?.barView.setCurrentSelection(selection)
-            self?.confirmExpectedSelection(selection)
+            guard let self else { return }
+            self.barView.setCurrentSelection(selection)
+            let offered = self.allModels.first { $0.id == selection.modelID }?.speedTiers ?? []
+            self.barView.setCurrentSpeed(self.speedSwitcher.observe(iconVisible: selection.speedIconVisible, offered: offered,
+                                                                    saved: selection.savedSpeed))
         }
         watcher.onFocusChange = { [weak self] in
             self?.barView.cancelReasoningPreview()
-            self?.cancelBackgroundChecks() // Another task can show a different model, so a check still waiting there would report a false failure.
         }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
-        tracker.start()
+        tracker.start() // Click-to-focus was removed after unreliable live targeting; do not restore a guessed pane resolver (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
 
         registerLoginItemOnFirstLaunch()
         updateTrustStatus(prompt: true)
@@ -82,25 +87,42 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func layout(for snapshot: CodexWindowTracker.Snapshot) {
         watcher.update(pid: snapshot.codexIsFrontmost ? snapshot.codexPID : nil, models: allModels)
 
-        // Show only while Codex is the active app and has a usable window on screen.
-        // While a switch is running Codex is necessarily frontmost, so this also keeps
-        // the bar visible during the switch.
-        guard snapshot.codexIsFrontmost, let window = snapshot.windowFrame,
-              let screen = screen(containing: window) else {
+        let windowScreen = snapshot.windowFrame.flatMap { screen(containing: $0) }
+        let flow = windowScreen.flatMap { screen -> CGRect? in
+            guard let window = snapshot.windowFrame else { return nil }
+            barView.availableWidth = screen.visibleFrame.width // Measure the normal strip every time; using the already-moved/wrapped bar would alternate between anchors.
+            let normalFrame = BarPlacement.place(window: window, visibleFrame: screen.visibleFrame,
+                                                 contentSize: barView.preferredSize)
+            return snapshot.agentFlowHUDFrame(overlapping: normalFrame) // Ethan only wants the bar beside Flow when Flow covers its normal position (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        }
+        let targetScreen = flow.flatMap { screen(containing: $0) } ?? windowScreen
+        let visible = snapshot.shouldShowToolbar && targetScreen != nil
+        let context = "requested=\(visible) codex-frontmost=\(snapshot.codexIsFrontmost) codex-context=\(snapshot.toolbarContextIsActive) frontmost-pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) task-window=\(snapshot.windowFrame != nil) has-flow=\(flow != nil) display=\(targetScreen?.localizedName ?? "none")"
+        defer {
+            if lastToolbarVisibilityContext != context {
+                Log.info("toolbar-presentation \(context) flow-panels=\(snapshot.agentFlowPanelFrames.count) hud=\(String(describing: flow)) frame=\(panel.frame) level=\(panel.level.rawValue) panel-visible=\(panel.isVisible) app-hidden=\(NSApp.isHidden)") // Log the result and chosen display on visibility/context changes, without logging every drag frame.
+                lastToolbarVisibilityContext = context
+            }
+        }
+        guard visible, let window = snapshot.windowFrame, let screen = targetScreen else {
             panel.orderOut(nil)
             return
         }
-        let placement = BarPlacement.place(
+        barView.availableWidth = screen.visibleFrame.width // Measure the normal horizontal row first; the placement rule compares both windows before choosing any narrower region.
+        let frame = BarPlacement.place(
             window: window,
             visibleFrame: screen.visibleFrame,
-            height: BarView.height,
-            contentWidth: barView.preferredWidth
+            contentSize: barView.preferredSize,
+            agentFlowHUD: flow,
+            obstructingWindows: snapshot.agentFlowPanelFrames,
+            contentSizeForWidth: { width in
+                self.barView.availableWidth = width
+                return self.barView.preferredSize
+            }
         )
-        barView.apply(slot: placement.slot)
-        if panel.frame != placement.frame {
-            panel.setFrame(placement.frame, display: true)
-        }
-        if !panel.isVisible { panel.orderFrontRegardless() }
+        barView.availableWidth = frame.width // Drawing uses the same width that fitted the selected clear region, never the last rejected candidate.
+        barView.obstructingWindows = [window] + snapshot.agentFlowPanelFrames // Floating notices must avoid the same Codex/Flow content as the toolbar.
+        panel.place(frame: frame, obstructingWindows: snapshot.agentFlowPanelFrames)
     }
 
     /// The screen showing most of the window.
@@ -144,18 +166,17 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func changeSpeed(_ request: SpeedSwitcher.Request) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
-        cancelBackgroundChecks()
         barView.setBusySpeed(true)
         barView.showStatus(nil)
         watcher.setSuspended(true)
-        speedSwitcher.change(request, allModels: allModels, codex: codex) { [weak self] result in
+        speedSwitcher.change(request, codex: codex) { [weak self] result in
             guard let self else { return }
             switch result {
             case .changed(let speed):
                 self.barView.showStatus("Speed: \(speed.rawValue)")
             case .requested(let speed):
                 self.barView.showStatus("Requested \(speed.rawValue)")
-                self.checkSpeedCommandInBackground()
+                self.barView.setCurrentSpeed(self.speedSwitcher.rememberedSpeed) // Fill the expected icon at once; the watcher's next read of Codex's icon replaces it.
             case .cancelled:
                 break
             case .cancelledForTyping:
@@ -172,34 +193,39 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func changeEffort(to effort: String) {
+        guard let modelID = barView.currentModelIdentifier else { return }
+        changeEffort(.select(effort, modelID: modelID))
+    }
+
+    /// The slider and Agentic Mouse use the same pane discovery, focus handoff and configured shortcuts.
+    private func changeEffort(_ request: ReasoningSwitcher.Request) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
-        guard let codex = tracker.codexApp,
-              let modelID = barView.currentModelIdentifier,
-              let model = allModels.first(where: { $0.id == modelID }) else { return }
-        cancelBackgroundChecks()
+        guard let codex = tracker.codexApp else { return }
         barView.setBusyReasoning(true)
         barView.showStatus(nil)
         watcher.setSuspended(true)
-        reasoningSwitcher.setEffort(effort, model: model, allModels: allModels, codex: codex) { [weak self] result in
+        reasoningSwitcher.change(request, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .changed:
-                self.barView.setCurrentSelection(CurrentSelection(modelID: model.id, effort: effort))
+            case .changed(let selection):
+                self.barView.setCurrentSelection(selection)
                 self.watcher.refreshSoon()
             case .requested:
-                self.checkSelectionInBackground(CurrentSelection(modelID: model.id, effort: effort),
-                                                failure: "Codex did not confirm the new reasoning level", color: .systemOrange)
-                self.watcher.refreshSoon() // Let Codex's actual label update the bar; posting keys does not prove the requested effort was applied.
+                self.watcher.refreshSoon() // Never verify: the bar assumes the keys worked and simply shows Codex's next label (Ethan, 2026-10-29, Claude session f9500cd2).
             case .cancelledForTyping:
                 self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
                 self.watcher.refreshSoon()
+            case .cancelled:
+                break
             case .failed(let reason):
-                Log.info("reasoning change to \(effort) failed: \(reason)")
+                Log.info("reasoning change \(request) failed: \(reason)")
                 self.barView.showStatus(reason, color: .systemOrange)
                 self.watcher.refreshSoon()
             }
-            self.barView.setBusyReasoning(false)
-            self.watcher.setSuspended(false)
+            if !self.reasoningSwitcher.isBusy {
+                self.barView.setBusyReasoning(false)
+                self.watcher.setSuspended(false)
+            }
         }
     }
 
@@ -214,6 +240,15 @@ final class AppController: NSObject, NSApplicationDelegate {
             return
         case .speedCancel:
             speedSwitcher.cancelMouseCommands()
+            return
+        case .reasoningUp:
+            changeEffort(.increase)
+            return
+        case .reasoningDown:
+            changeEffort(.decrease)
+            return
+        case .reasoningCancel:
+            reasoningSwitcher.cancelMouseCommands()
             return
         case .astraUltrafast: break
         }
@@ -231,7 +266,6 @@ final class AppController: NSObject, NSApplicationDelegate {
             return
         }
         guard let codex = tracker.codexApp else { return }
-        cancelBackgroundChecks()
         barView.setBusyModel(id: model.id)
         barView.showStatus(nil)
         watcher.setSuspended(true)
@@ -241,11 +275,12 @@ final class AppController: NSObject, NSApplicationDelegate {
             switch result {
             case .switched(let selection), .alreadyCurrent(let selection):
                 self.barView.setCurrentSelection(selection)
-                if enableUltrafast { self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue) }
+                if enableUltrafast {
+                    self.speedSwitcher.rememberSpeed(.ultrafast)
+                    self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue)
+                }
                 self.watcher.refreshSoon()
             case .requested:
-                self.checkSelectionInBackground(CurrentSelection(modelID: model.id, effort: nil),
-                                                failure: "Failed to switch to \(model.displayName)", color: .systemRed)
                 self.watcher.refreshSoon() // The ordinary switch ends at Return; do not fabricate a model highlight from the requested target.
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
@@ -267,61 +302,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Background checks
-
-    // Checks start after a request has finished, so they never delay the next click. Ethan rejected
-    // blocking final verification, then asked to keep it "optional in like a separate thread"
-    // (task 01a0d315-7d5e-7be0-bc08-80626ca0729b); do not make a switch wait for these again.
-    private var backgroundCheckGeneration = 0
-    /// What the watcher should report next. A nil effort accepts any effort.
-    private var expectedSelection: (selection: CurrentSelection, finishedAt: TimeInterval)?
-
-    /// A newer request or a focus change makes older checks stale; they then end silently.
-    private func cancelBackgroundChecks() {
-        backgroundCheckGeneration += 1
-        expectedSelection = nil
-    }
-
-    /// Waits for the existing watcher to report `expected`; shows `failure` if it never does.
-    private func checkSelectionInBackground(_ expected: CurrentSelection, failure: String, color: NSColor) {
-        let generation = backgroundCheckGeneration
-        expectedSelection = (expected, ProcessInfo.processInfo.systemUptime)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in // Same 5 s limit as the old blocking confirmation; waiting here delays nothing.
-            guard let self, self.backgroundCheckGeneration == generation, self.expectedSelection != nil else { return }
-            self.expectedSelection = nil
-            guard self.tracker.snapshot.codexIsFrontmost else { return } // The watcher stops reading while Codex is in the background, so its silence proves nothing.
-            Log.info("background-check kind=selection result=unconfirmed model=\(expected.modelID ?? "none") effort=\(expected.effort ?? "any")")
-            self.barView.showStatus(failure, color: color)
-        }
-    }
-
-    /// Ends the waiting selection check once the watcher reports the expected model and effort.
-    private func confirmExpectedSelection(_ selection: CurrentSelection) {
-        guard let expected = expectedSelection, selection.modelID == expected.selection.modelID,
-              expected.selection.effort == nil || selection.effort == expected.selection.effort else { return }
-        expectedSelection = nil
-        Log.info("background-check kind=selection result=confirmed elapsed=\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - expected.finishedAt))s")
-    }
-
-    /// Reports a Fast/Ultrafast command that Return left in the message box, like the
-    /// `/fast/fast` draft Ethan found on 2026-10-09.
-    private func checkSpeedCommandInBackground() {
-        let generation = backgroundCheckGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in // A lagging Codex can run a pasted command late; reading sooner would report false failures.
-            guard let self, self.backgroundCheckGeneration == generation,
-                  self.tracker.snapshot.codexIsFrontmost, let pid = self.tracker.snapshot.codexPID else { return }
-            AX.queue.async {
-                let unsent = SpeedSwitcher.unsentCommand(pid: pid)
-                DispatchQueue.main.async {
-                    guard self.backgroundCheckGeneration == generation else { return }
-                    Log.info("background-check kind=speed result=\(unsent.map { "left-\($0)" } ?? "no-command-left")")
-                    guard let unsent else { return }
-                    self.barView.showStatus("Speed change failed. Remove \"\(unsent)\" from message box",
-                                            color: .systemRed, sticky: true)
-                }
-            }
-        }
-    }
+    // Background "did not confirm" checks were removed at Ethan's request on 2026-10-29: "never verify, just send the thing
+    // assuming it's working" (Claude session f9500cd2). Do not reintroduce confirmation reads or failure notices for sent actions.
 
     // MARK: - Accessibility permission
 

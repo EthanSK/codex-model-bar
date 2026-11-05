@@ -28,4 +28,16 @@ final class MouseShortcutTests: XCTestCase {
             }
         }
     }
+
+    func testReasoningRatchetURLsAcceptOnlyFixedPayloadFreeActions() throws {
+        for (name, expected) in [("reasoning-up", MouseShortcut.Action.reasoningUp),
+                                 ("reasoning-down", .reasoningDown), ("reasoning-cancel", .reasoningCancel)] {
+            XCTAssertEqual(MouseShortcut.action(for: try XCTUnwrap(URL(string: "codex-model-bar://\(name)"))), expected)
+            for text in ["codex-model-bar://\(name)/extra", "codex-model-bar://\(name)?effort=max",
+                         "codex-model-bar://\(name)#text", "codex-model-bar://\(name):123",
+                         "codex-model-bar://user@\(name)", "https://\(name)"] {
+                XCTAssertNil(MouseShortcut.action(for: try XCTUnwrap(URL(string: text))), text)
+            }
+        }
+    }
 }

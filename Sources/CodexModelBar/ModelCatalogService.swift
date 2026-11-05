@@ -94,9 +94,11 @@ final class ModelCatalogService {
     private static func codexBinaryCandidates(codexAppURL: URL?) -> [String] {
         var paths: [String] = []
         if let app = codexAppURL {
+            paths.append(app.appendingPathComponent("Contents/Resources/codex-cli/bin/codex").path) // Desktop 26.1027 moved its CLI here (a launcher script that execs CodexCLI.app); the old path no longer exists, so this fallback never ran.
             paths.append(app.appendingPathComponent("Contents/Resources/codex").path)
         }
         paths += [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",

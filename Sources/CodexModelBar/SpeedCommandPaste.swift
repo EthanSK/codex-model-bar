@@ -1,19 +1,18 @@
 import AppKit
 import ApplicationServices
 
-/// Matches Agent Flow's foreground Command-V followed by Return, without menu discovery.
+/// Historical name: this used to paste. Speed commands now use one direct
+/// Unicode key pair followed by Return, without touching any pasteboard.
 enum SpeedCommandPaste {
-    /// Build the same physical paste shortcut and HID Return that Agent Flow uses.
-    static func events() -> [CGEvent]? {
-        let pasteSource = CGEventSource(stateID: .privateState)
+    /// Reuse the existing whole-text Unicode encoder; no per-character typing.
+    static func events(_ command: String) -> [CGEvent]? {
+        guard var events = Keyboard.textEvents(payload(command)) else { return nil }
+        for event in events { event.flags = [] }
         let returnSource = CGEventSource(stateID: .hidSystemState)
-        var events: [CGEvent] = []
-        for (key, down, flags) in [(CGKeyCode(55), true, CGEventFlags.maskCommand),
-                                  (9, true, .maskCommand), (9, false, .maskCommand),
-                                  (55, false, []), (36, true, []), (36, false, [])] {
-            guard let event = CGEvent(keyboardEventSource: key == 36 ? returnSource : pasteSource,
-                                      virtualKey: key, keyDown: down) else { return nil }
-            event.flags = flags
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: returnSource,
+                                      virtualKey: Keyboard.returnKey, keyDown: down) else { return nil }
+            event.flags = []
             events.append(event)
         }
         return events
@@ -25,25 +24,26 @@ enum SpeedCommandPaste {
     /// Codex removes only its suggestion range, preserving the surrounding draft.
     static func payload(_ command: String) -> String { " " + command }
 
-    /// Leave the command available until the receiving app consumes its queued paste.
-    static func prepare(_ command: String, on board: NSPasteboard) -> Bool {
-        board.clearContents()
-        return board.setString(payload(command), forType: .string) // Agent Flow's current foreground route leaves its clipboard payload too; timed restoration could replace a command before a lagging app reads it.
-    }
+    /// Ethan: "just send it best effort" with "a bit more delay between each
+    /// step". Give the focused input 100 ms before typing, then give Codex's
+    /// inline command handler the same 100 ms after the whole text;
+    /// never poll for a result, retry the toggle or use the clipboard.
+    /// Model search shares this pre-text delay after its input focus handoff.
+    static let commandStepDelay: useconds_t = 100_000
 
-    /// Paste once and post one Return; no command-menu checks, retries or text cleanup.
-    static func post(_ command: String, canPost: () -> Bool) -> Bool {
-        guard let events = events(), canPost(), prepare(command, on: .general) else { return false }
-        let changeCount = NSPasteboard.general.changeCount
+    /// Type once and post one Return. Once a key goes down, always send its up
+    /// event; recheck the keyboard owner before starting either key pair.
+    static func post(_ command: String, canPost: () -> Bool,
+                     send: (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) },
+                     wait: (useconds_t) -> Void = { _ = usleep($0) }) -> Bool {
+        guard canPost(), let events = events(command) else { return false }
+        wait(commandStepDelay) // Let the shared main/side-chat input focus settle before either bar or mouse typing (Ethan, 2026-10-31).
         for (index, event) in events.enumerated() {
-            if index == 1, (!canPost() || NSPasteboard.general.changeCount != changeCount) {
-                events[3].post(tap: .cghidEventTap) // A changed foreground app or newer clipboard copy must release Command without pasting that other payload.
-                return false
-            }
-            if index == 4, !canPost() { return false }
-            event.post(tap: .cghidEventTap)
-            if index < 3 { usleep(10_000) }
-            if index == 4 { usleep(30_000) } // Agent Flow's HID Return needs a real down/up interval; private back-to-back Return was ignored by Electron.
+            if index.isMultiple(of: 2), !canPost() { return false }
+            send(event)
+            if index == 0 { wait(10_000) }
+            if index == 1 { wait(commandStepDelay) }
+            if index == 2 { wait(30_000) } // Preserve the HID Return's real down/up interval used by Electron.
         }
         return true
     }

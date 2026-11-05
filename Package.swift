@@ -1,5 +1,5 @@
 // swift-tools-version:5.9
-// Codex Model Bar — a small macOS companion strip that sits under the Codex
+// Codex Model Bar — a small macOS companion toolbar for the Codex
 // (ChatGPT desktop app) window and switches the open chat's model in one click.
 //
 // Two targets:

@@ -3,10 +3,16 @@ import Foundation
 public struct CurrentSelection: Equatable, Sendable {
     public let modelID: String?
     public let effort: String?
+    /// Whether Codex's model button shows its Fast/Ultrafast icon; nil when the button was not read.
+    public let speedIconVisible: Bool?
+    /// Codex's last saved speed choice (`service_tier` in its config); tells Fast from Ultrafast when the icon cannot. Nil when unreadable.
+    public let savedSpeed: ResponseSpeed?
 
-    public init(modelID: String?, effort: String?) {
+    public init(modelID: String?, effort: String?, speedIconVisible: Bool? = nil, savedSpeed: ResponseSpeed? = nil) {
         self.modelID = modelID
         self.effort = effort
+        self.speedIconVisible = speedIconVisible
+        self.savedSpeed = savedSpeed
     }
 }
 

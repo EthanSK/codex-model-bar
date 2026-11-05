@@ -58,26 +58,51 @@ enum CodexUI {
 
     /// Resolve the focused input first, then a still-attached previous input.
     /// Multiple composers without either identity are deliberately ambiguous.
-    static func locate(in window: AXUIElement, models: [CodexModel], previousComposer: AXUIElement?) -> Located {
+    /// Returns nil only when `yieldsToActions` stopped the walk for a queued user action.
+    static func locate(in window: AXUIElement, models: [CodexModel], previousComposer: AXUIElement?,
+                       yieldsToActions: Bool) -> Located? {
+        let started = ProcessInfo.processInfo.systemUptime
         var pid: pid_t = 0
         guard AXUIElementGetPid(window, &pid) == .success else { return Located() }
         let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
         var trace: [String] = []
+        var interrupted = false
         var inputFlags: Set<String> = []
+        var lastRoleNode: AXUIElement?
+        var lastRole = ""
+        func role(_ node: AXUIElement) -> String {
+            if lastRoleNode.map({ CFEqual($0, node) }) != true {
+                lastRoleNode = node
+                lastRole = AX.role(node)
+            }
+            return lastRole // The traversal's web-area, model and input predicates share one role IPC per node, without retaining the tree.
+        }
         let resolver = ComposerLocator<AXUIElement>(
             children: AX.children, parent: AX.parent,
             isTextArea: {
-                let isInput = AX.role($0) == kAXTextAreaRole as String
+                let isInput = role($0) == kAXTextAreaRole as String
                 if isInput { inputFlags.insert("\(identity($0)):focused=\(AX.isFocused($0))") }
                 return isInput
             },
             isModelButton: {
-                AX.role($0) == kAXPopUpButtonRole as String
+                role($0) == kAXPopUpButtonRole as String
                     && CurrentModelMatcher.isModelButtonTitle(AX.title($0), among: models)
             }, equals: { CFEqual($0, $1) }, hasKeyboardFocus: AX.isFocused,
+            isWebArea: { role($0) == "AXWebArea" },
+            isConversationRegion: isConversationRegion,
+            isInterrupted: {
+                guard yieldsToActions, AX.hasQueuedAction else { return false }
+                interrupted = true
+                return true
+            },
             diagnostic: { if trace.count < 40 { trace.append($0) } }
         )
         let result = resolver.locate(in: window, focused: focused, previousComposer: previousComposer)
+        if interrupted {
+            Log.info("composer-scan interrupted-for-action duration-ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+            return nil // A partial walk must not replace the last result; the caller keeps it and walks again after the action.
+        }
+        Log.info("composer-scan duration-ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) \(trace.first(where: { $0.hasPrefix("window-scan") }) ?? "unknown")") // Counts/timing only; never log the draft, conversation or embedded page contents.
         let selection = CurrentModelMatcher.selection(forButtonTitle: result.map { AX.title($0.modelButton) } ?? "", among: models)
         lookupDiagnostic = "window=\(identity(window)) focused=\(identity(focused)) previous=\(identity(previousComposer)) selected=\(identity(result?.composer)) model=\(selection.modelID ?? "none") effort=\(selection.effort ?? "none") inputs=[\(inputFlags.sorted().joined(separator: ","))] trace=[\(trace.joined(separator: ";"))]"
         if lookupDiagnostic != lastDiagnostic || Date().timeIntervalSince(lastDiagnosticAt) > 10 {
@@ -88,6 +113,62 @@ enum CodexUI {
         guard let result else { return Located() }
         return Located(modelButton: result.modelButton, composer: result.composer,
                        scopeAncestors: result.scopeAncestors)
+    }
+
+    /// Avoid transcript discovery when Codex already identifies an attached focused chat input.
+    static func focusedSpeedInput(in window: AXUIElement) -> AXUIElement? {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success,
+              let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        else { return nil }
+        if let input = inputLocator.focusedInput(in: window, focused: focused) { return input }
+        guard let pairedComposer = Cache.windowForLocated.map({ CFEqual($0, window) }) == true ? Cache.located.composer : nil
+        else { return nil }
+        if CFEqual(pairedComposer, focused) { return focused } // Codex drops the Conversation landmark while a new or hidden transcript loads (2026-10-27 22:15:47 UTC: sole focused input, region=none); the composer the model lookup already paired is still this pane's input.
+        return inputLocator.regionlessInput(pairedComposer, in: window, focused: focused)
+    }
+
+    /// Capture the intended pane before activation can restore the previously used input.
+    static func speedConversation(in window: AXUIElement) -> AXUIElement? {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else { return nil }
+        let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        let previous = Cache.windowForLocated.map { CFEqual($0, window) } == true ? Cache.located.composer : nil
+        let region = inputLocator.conversation(in: window, focused: focused, previousComposer: previous)
+        Log.info("speed-pane window=\(identity(window)) focused=\(identity(focused)) previous=\(identity(previous)) region=\(identity(region))")
+        return region
+    }
+
+    /// Speed needs the chat input, not the model button that may mount later.
+    static func speedInput(in conversation: AXUIElement) -> AXUIElement? {
+        inputLocator.input(inConversation: conversation) // The pane supplies identity; Codex changes its input label between new, working and Work-mode chats.
+    }
+
+    /// Whether the composer's model button shows Codex's Fast/Ultrafast icon, read from its few children on each poll.
+    ///
+    /// Measured on desktop 26.1027: `AXPopUpButton "GPT-6.1 Sol High"` holds `AXImage` with DOM class
+    /// `_ModelPickerTriggerInlineModeIcon_1sfbj_2` only while a faster tier is on. The icon has no title, so this cannot tell
+    /// Fast from Ultrafast; `ResponseSpeedMemory.displayedSpeed` does that. Codex's feature-flagged "daybreak" indicator uses
+    /// the same class but replaces the speed icon while shown, so it would read as a faster tier.
+    static func showsSpeedIcon(_ modelButton: AXUIElement) -> Bool {
+        AX.children(modelButton).contains { child in
+            AX.role(child) == kAXImageRole as String
+                && ((AX.attribute(child, "AXDOMClassList") as [String]?) ?? []).contains { $0.contains("ModelPickerTriggerInlineModeIcon") } // Match the CSS module's base name; its hash suffix changes between Codex builds.
+        }
+    }
+
+    private static func isConversationRegion(_ node: AXUIElement) -> Bool {
+        AX.string(node, kAXSubroleAttribute) == "AXLandmarkRegion"
+            && AX.string(node, kAXDescriptionAttribute) == "Conversation" // Same structural identity measured by Agent Flow's pane_focuser.py; no app-version gate.
+    }
+
+    private static var inputLocator: ComposerLocator<AXUIElement> {
+        ComposerLocator(children: AX.children, parent: AX.parent,
+                        isTextArea: { AX.role($0) == kAXTextAreaRole as String },
+                        isModelButton: { _ in false }, equals: { CFEqual($0, $1) },
+                        hasKeyboardFocus: AX.isFocused,
+                        isWebArea: { AX.role($0) == "AXWebArea" },
+                        isConversationRegion: isConversationRegion)
     }
 
     /// The message box's real text (its placeholder counts as empty).
@@ -247,48 +328,57 @@ enum CodexUI {
     enum Cache {
         static var located = Located()
         static var windowForLocated: AXUIElement?
-        /// The text area that had keyboard focus at the last walk (see `focusMoved`).
+        /// The focused input or Conversation region at the last walk (see `focusMoved`).
         private static var focusedAtLastWalk: AXUIElement?
         private static var lastLocatedAt = Date.distantPast
         private static var rememberedComposer: AXUIElement?
 
         /// Returns cached elements when they still look right, otherwise re-locates.
-        static func current(window: AXUIElement, models: [CodexModel], forceRefresh: Bool = false) -> Located {
+        /// `yieldsToActions` is for the background poll only: a queued action stops its walk and the last result is returned unchanged.
+        static func current(window: AXUIElement, models: [CodexModel], forceRefresh: Bool = false,
+                            yieldsToActions: Bool = false) -> Located {
             if windowForLocated.map({ !CFEqual($0, window) }) ?? true { rememberedComposer = nil }
+            if !forceRefresh, located.modelButton == nil,
+               windowForLocated.map({ CFEqual($0, window) }) == true,
+               Date().timeIntervalSince(lastLocatedAt) < 1, !focusMoved(window: window) {
+                return located // A loading/missing composer must not trigger four whole-window walks a second; focus events still bypass this short negative cache.
+            }
             if !forceRefresh, let cachedWindow = windowForLocated, CFEqual(cachedWindow, window),
                let button = located.modelButton,
-               Date().timeIntervalSince(lastLocatedAt) < 0.5,
+               Date().timeIntervalSince(lastLocatedAt) < 5,
+               located.composer.map({ AX.role($0) == kAXTextAreaRole as String }) == true,
                CurrentModelMatcher.isModelButtonTitle(AX.title(button), among: models),
                !focusMoved(window: window) {
                 return located
             }
-            located = locate(in: window, models: models, previousComposer: rememberedComposer)
+            guard let fresh = locate(in: window, models: models, previousComposer: rememberedComposer,
+                                     yieldsToActions: yieldsToActions) else {
+                return windowForLocated.map { CFEqual($0, window) } == true ? located : Located() // Timestamps stay old, so the next poll walks again once the action has run.
+            }
+            located = fresh
             // A render gap should not erase the last input identity. The resolver
             // still requires it to be paired in the next live window scan.
             if let composer = located.composer { rememberedComposer = composer }
             windowForLocated = window
-            focusedAtLastWalk = focusedTextArea(window: window)
+            focusedAtLastWalk = focusedElement(window: window)
             lastLocatedAt = Date()
             return located
         }
 
-        /// True when keyboard focus is now in a text area that is neither the cached
-        /// message box nor the one focused at the last walk, e.g. the user clicked into the
-        /// other chat of a split view. Remembering the last one means a focused non-composer
-        /// text area (such as a code viewer) triggers one walk, not one every poll.
+        /// A newly focused Conversation region also invalidates the cache after a main/side body click.
+        /// Remembering the element means an unchanged container or code editor triggers one walk, not one every poll.
         static func focusMoved(window: AXUIElement) -> Bool {
-            guard let focused = focusedTextArea(window: window) else { return false }
+            guard let focused = focusedElement(window: window) else { return false }
             if let composer = located.composer, CFEqual(focused, composer) { return false }
             if let last = focusedAtLastWalk, CFEqual(last, focused) { return false }
             return true
         }
 
-        /// The app's focused element when it is a text area. One or two AX calls.
-        private static func focusedTextArea(window: AXUIElement) -> AXUIElement? {
+        /// Read the app's focused element, including a chat region whose input is not focused yet.
+        private static func focusedElement(window: AXUIElement) -> AXUIElement? {
             var pid: pid_t = 0
             guard AXUIElementGetPid(window, &pid) == .success,
-                  let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
-                  AX.role(focused) == kAXTextAreaRole as String else { return nil }
+                  let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute) else { return nil }
             return focused
         }
 

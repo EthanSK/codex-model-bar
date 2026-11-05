@@ -16,7 +16,8 @@ VERSION="$(cat VERSION)"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || true)"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 if (( BUILD_NUMBER < 1 )); then BUILD_NUMBER=1; fi
-OUT="$ROOT/build"
+OUT="${CODEX_MODEL_BAR_BUILD_ROOT:-$ROOT}/build.noindex"
+SCRATCH="${CODEX_MODEL_BAR_BUILD_ROOT:-$ROOT}/.build.noindex"
 APP="$OUT/$APP_NAME.app"
 INSTALL_DIR="$HOME/Applications"
 ARCH="${CODEX_MODEL_BAR_ARCH:-$(uname -m)}"
@@ -34,8 +35,8 @@ if [[ -z "$SIGN_ID" ]]; then
 fi
 
 echo "==> Building release binary"
-swift build -c release --arch "$ARCH"
-BIN_DIR="$(swift build --show-bin-path -c release --arch "$ARCH")"
+swift build --scratch-path "$SCRATCH" -c release --arch "$ARCH"
+BIN_DIR="$(swift build --scratch-path "$SCRATCH" --show-bin-path -c release --arch "$ARCH")"
 
 echo "==> Rendering icon"
 ICONSET="$OUT/AppIcon.iconset"

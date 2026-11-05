@@ -22,7 +22,7 @@
 	<string>__BUILD__</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
-	<!-- Accessory app: no Dock icon and no menu bar; the bar under Codex is the whole UI. -->
+	<!-- Accessory app: no Dock icon and no menu bar; the toolbar is the whole UI. -->
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>

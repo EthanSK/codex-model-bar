@@ -8,7 +8,7 @@ import CodexModelBarCore
 final class BarPanel: NSPanel {
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: BarView.height),
+            contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -32,12 +32,28 @@ final class BarPanel: NSPanel {
     // Never take keyboard focus away from Codex.
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    /// Keep the toolbar reachable if Flow intersects its on-screen position.
+    func place(frame: CGRect, obstructingWindows: [CGRect]) {
+        level = obstructingWindows.contains { frame.intersects($0) } ? .floating + 2 : .floating // Ethan wants the bar beside Flow's HUD and always visible; clear Flow's level (.floating + 1) without moving either window (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        if self.frame != frame {
+            setFrame(frame, display: true)
+        }
+        if !isVisible { orderFrontRegardless() }
+        (contentView as? BarView)?.placeStatus()
+    }
+
+    override func orderOut(_ sender: Any?) {
+        (contentView as? BarView)?.hideStatus()
+        super.orderOut(sender)
+    }
 }
 
-/// Content of the strip: a translucent background with one button per model, plus a
-/// short status line on the right for errors and the Accessibility hint.
+/// A horizontal toolbar that wraps only when its available screen width runs out.
+/// Status messages float outside the controls without changing the toolbar's size.
 final class BarView: NSVisualEffectView {
-    static let height: CGFloat = 30
+    var availableWidth: CGFloat? { didSet { if availableWidth != oldValue { needsLayout = true } } } // Ethan rejected an unconditional vertical rail: keep the horizontal layout beside Flow and wrap only for insufficient side space (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+    var obstructingWindows: [CGRect] = [] // Reuse the tracker's geometry for floating notices; never read either app again just to place one.
 
     /// Called when a model button is clicked.
     var onSelect: ((CodexModel) -> Void)?
@@ -47,7 +63,7 @@ final class BarView: NSVisualEffectView {
     var onSelectSpeed: ((ResponseSpeed) -> Void)?
     /// Called when the status text is clicked (used for "Allow Accessibility access").
     var onStatusClick: (() -> Void)?
-    /// Repositions the panel when the visible model list changes its required width.
+    /// Repositions the panel when the visible model list changes its required size.
     var onSizeChange: (() -> Void)?
     /// Supplies the right-click menu.
     var menuProvider: (() -> NSMenu)?
@@ -60,8 +76,10 @@ final class BarView: NSVisualEffectView {
     private let reasoningSlider = ReasoningSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let separator = NSBox()
     private let speedSeparator = NSBox()
+    private let visibleSpeeds: [ResponseSpeed] = [.fast, .ultrafast] // Ethan removed the Standard icon; click the active tier again to toggle it off (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
     private var speedButtons: [ResponseSpeed: NSButton] = [:]
     private let statusButton = NSButton(title: "", target: nil, action: nil)
+    private let statusPanel = BarPanel() // Ethan rejected messages replacing the reasoning slider; reuse the nonactivating panel for a separate notice (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
     private var buttons: [String: ModelButton] = [:]
     private var models: [CodexModel] = []
     private var catalogModels: [CodexModel] = []
@@ -73,6 +91,7 @@ final class BarView: NSVisualEffectView {
     private var busyReasoning = false
     private var busyModelID: String?
     private var busySpeed = false
+    private var currentSpeed: ResponseSpeed? // Best-effort speed of the focused chat; nil when Codex's model button was not read.
     private var statusHideWork: DispatchWorkItem?
 
     var currentModelIdentifier: String? { currentModelID }
@@ -90,8 +109,8 @@ final class BarView: NSVisualEffectView {
         addSubview(separator)
         speedSeparator.boxType = .separator
         addSubview(speedSeparator)
-        for speed in ResponseSpeed.allCases {
-            let button = NSButton(image: Self.speedImage(for: speed),
+        for speed in visibleSpeeds {
+            let button = NSButton(image: Self.speedImage(for: speed, filled: false),
                                   target: self, action: #selector(speedClicked(_:)))
             button.isBordered = false
             button.imagePosition = .imageOnly
@@ -104,6 +123,7 @@ final class BarView: NSVisualEffectView {
 
         reasoningLabel.font = .systemFont(ofSize: 11, weight: .medium)
         reasoningLabel.textColor = .secondaryLabelColor
+        reasoningLabel.alignment = .center
         let longestReasoningLabel = "Reasoning Extra High" as NSString
         reasoningLabelWidth = ceil(longestReasoningLabel.size(withAttributes: [
             .font: reasoningLabel.font as Any,
@@ -143,26 +163,29 @@ final class BarView: NSVisualEffectView {
         statusButton.action = #selector(statusClicked)
         statusButton.isHidden = true
         (statusButton.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-        addSubview(statusButton)
+        let statusBackground = NSVisualEffectView()
+        statusBackground.material = material
+        statusBackground.blendingMode = blendingMode
+        statusBackground.state = state
+        statusBackground.wantsLayer = true
+        statusBackground.layer?.cornerRadius = 7
+        statusBackground.layer?.masksToBounds = true
+        statusBackground.addSubview(statusButton)
+        statusPanel.contentView = statusBackground
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// Which corners to round depends on where the strip is attached.
-    func apply(slot: BarPlacement.Slot) {
-        switch slot {
-        case .below: layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]   // bottom corners
-        case .above: layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]   // top corners
-        case .insideTop: layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner,
-                                                 .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        }
+    /// Model selection, reasoning previews and status messages never change the natural width.
+    var preferredWidth: CGFloat {
+        return modelWidths.reduce(0, +) + CGFloat(max(models.count - 1, 0)) * modelSpacing
+            + sectionSpacing + naturalReasoningWidth + speedWidth + 16
     }
 
-    /// Independent of the current layout: compressed controls never feed a smaller
-    /// width back into the panel, and status messages use the reasoning area.
-    var preferredWidth: CGFloat {
-        modelWidths.reduce(0, +) + CGFloat(max(models.count - 1, 0)) * modelSpacing
-            + sectionSpacing + naturalReasoningWidth + speedWidth + 16
+    var preferredSize: CGSize {
+        let minimumWidth = max(modelWidths.max() ?? 0, max(reasoningLabelWidth, sliderWidth)) + 16
+        let width = min(preferredWidth, max(minimumWidth, availableWidth ?? preferredWidth)) // Keep controls readable; placement rejects clear regions narrower than this minimum and tries another side.
+        return controlLayout(width: width).size
     }
 
     private var modelWidths: [CGFloat] {
@@ -173,41 +196,106 @@ final class BarView: NSVisualEffectView {
         1 + sectionSpacing + reasoningLabelWidth + sectionSpacing + sliderWidth
     }
 
-    private var speedWidth: CGFloat { sectionSpacing * 2 + 1 + 3 * 24 }
+    private var speedWidth: CGFloat { sectionSpacing * 2 + 1 + CGFloat(visibleSpeeds.count * 24) }
+
+    private struct ControlLayout {
+        let size: CGSize
+        let frames: [CGRect] // Models in display order, followed by the reasoning group and the two speed icons together.
+        let separators: [CGRect?]
+    }
+
+    /// Measure and place the same groups for both window sizing and actual drawing.
+    private func controlLayout(width: CGFloat) -> ControlLayout {
+        let contentWidth = max(0, width - 16)
+        let reasoningFits = reasoningLabelWidth + sectionSpacing + sliderWidth <= contentWidth
+        let reasoningSize = reasoningFits
+            ? CGSize(width: reasoningLabelWidth + sectionSpacing + sliderWidth, height: 26)
+            : CGSize(width: max(reasoningLabelWidth, sliderWidth), height: 44)
+        let sizes = modelWidths.map { CGSize(width: $0, height: 22) }
+            + [reasoningSize, CGSize(width: CGFloat(visibleSpeeds.count * 24), height: 22)]
+        var rows: [[Int]] = [[]]
+        var rowHeights: [CGFloat] = [0]
+        var frames: [CGRect] = []
+        var separators: [CGRect?] = []
+        var x: CGFloat = 8
+        for (index, size) in sizes.enumerated() {
+            let isSection = index >= models.count
+            var gap: CGFloat = x == 8 ? 0 : (isSection ? sectionSpacing * 2 + 1 : modelSpacing)
+            if x + gap + size.width > width - 8 && x > 8 {
+                rows.append([])
+                rowHeights.append(0)
+                x = 8
+                gap = 0
+            }
+            separators.append(isSection && gap > 0 ? CGRect(x: x + sectionSpacing, y: 0, width: 1, height: 17) : nil)
+            frames.append(CGRect(x: x + gap, y: 0, width: size.width, height: size.height))
+            rows[rows.count - 1].append(index)
+            rowHeights[rowHeights.count - 1] = max(rowHeights.last ?? 0, size.height)
+            x += gap + size.width
+        }
+        let height = 4 + rowHeights.reduce(0, +) + CGFloat(rows.count - 1) * modelSpacing
+        var top = height - 2
+        for (row, indices) in rows.enumerated() {
+            for index in indices {
+                frames[index].origin.y = top - (rowHeights[row] + frames[index].height) / 2
+                if separators[index] != nil { separators[index]!.origin.y = top - (rowHeights[row] + 17) / 2 }
+            }
+            top -= rowHeights[row] + modelSpacing
+        }
+        return ControlLayout(size: CGSize(width: width, height: height), frames: frames, separators: separators)
+    }
 
     override func layout() {
         super.layout()
-        let available = max(0, bounds.width - 16 - speedWidth)
-        let reasoningWidth = min(naturalReasoningWidth, max(150, available * 0.45))
-        let gaps = CGFloat(max(models.count - 1, 0)) * modelSpacing
-        let buttonSpace = max(0, available - reasoningWidth - sectionSpacing - gaps)
-        let naturalButtons = modelWidths.reduce(0, +)
-        let scale = min(1, buttonSpace / max(naturalButtons, 1))
-        var x: CGFloat = 8
-        for model in models {
-            guard let button = buttons[model.id] else { continue }
-            let width = button.intrinsicContentSize.width * scale
-            button.frame = NSRect(x: x, y: (bounds.height - 22) / 2, width: width, height: 22)
-            x += width + modelSpacing
+        let layout = controlLayout(width: bounds.width)
+        for (index, model) in models.enumerated() { buttons[model.id]?.frame = layout.frames[index] }
+        for (view, index) in [(separator, models.count), (speedSeparator, models.count + 1)] {
+            view.isHidden = layout.separators[index] == nil
+            if let frame = layout.separators[index] { view.frame = frame }
         }
-        if !models.isEmpty { x -= modelSpacing }
-        x += sectionSpacing
-        separator.frame = NSRect(x: x, y: (bounds.height - 17) / 2, width: 1, height: 17)
-        x += 1 + sectionSpacing
-        let remaining = max(0, bounds.width - 8 - speedWidth - x)
-        let labelWidth = min(reasoningLabelWidth, max(60, remaining - sectionSpacing - 70))
-        reasoningLabel.frame = NSRect(x: x, y: (bounds.height - 16) / 2, width: labelWidth, height: 16)
-        reasoningSlider.frame = NSRect(x: x + labelWidth + sectionSpacing, y: 2,
-                                      width: max(0, remaining - labelWidth - sectionSpacing), height: bounds.height - 4)
-        statusButton.frame = NSRect(x: x, y: 3, width: remaining, height: bounds.height - 6)
-        reasoningLabel.isHidden = !statusButton.isHidden
-        reasoningSlider.isHidden = !statusButton.isHidden
-        speedSeparator.frame = NSRect(x: bounds.width - 8 - speedWidth + sectionSpacing,
-                                      y: (bounds.height - 17) / 2, width: 1, height: 17)
-        for (index, speed) in ResponseSpeed.allCases.enumerated() {
-            speedButtons[speed]?.frame = NSRect(x: bounds.width - 8 - 72 + CGFloat(index * 24),
-                                               y: (bounds.height - 22) / 2, width: 24, height: 22)
+        let reasoningFrame = layout.frames[models.count]
+        let stackedReasoning = reasoningFrame.height > 26
+        reasoningLabel.alignment = .left
+        reasoningLabel.frame = CGRect(x: reasoningFrame.minX,
+                                      y: stackedReasoning ? reasoningFrame.maxY - 16 : reasoningFrame.midY - 8,
+                                      width: reasoningLabelWidth, height: 16)
+        reasoningSlider.frame = CGRect(x: stackedReasoning ? reasoningFrame.minX : reasoningLabel.frame.maxX + sectionSpacing,
+                                       y: reasoningFrame.minY, width: sliderWidth, height: stackedReasoning ? 24 : 26)
+        let speedsFrame = layout.frames[models.count + 1]
+        for (index, speed) in visibleSpeeds.enumerated() {
+            speedButtons[speed]?.frame = CGRect(x: speedsFrame.minX + CGFloat(index * 24), y: speedsFrame.minY, width: 24, height: 22)
         }
+        placeStatus()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        placeStatus()
+    }
+
+    /// Follow the toolbar as its child, while keeping the message outside every control.
+    func placeStatus() {
+        guard !statusButton.isHidden, let window, window.isVisible, let screen = window.screen else {
+            hideStatus()
+            return
+        }
+        let size = CGSize(width: ceil(statusButton.attributedTitle.size().width) + 20, height: 26)
+        let frame = BarPlacement.status(beside: window.frame, visibleFrame: screen.visibleFrame, contentSize: size,
+                                        obstructingWindows: obstructingWindows)
+        statusButton.frame = CGRect(x: 10, y: 2, width: max(0, frame.width - 20), height: 22)
+        statusPanel.level = window.level
+        statusPanel.setFrame(frame, display: true)
+        if statusPanel.parent !== window {
+            statusPanel.parent?.removeChildWindow(statusPanel)
+            window.addChildWindow(statusPanel, ordered: .above)
+        }
+        if !statusPanel.isVisible { statusPanel.orderFrontRegardless() }
+    }
+
+    /// A hidden or detached toolbar must not leave a floating notice over another app.
+    func hideStatus() {
+        statusPanel.parent?.removeChildWindow(statusPanel)
+        statusPanel.orderOut(nil)
     }
 
     // MARK: - Content
@@ -274,6 +362,13 @@ final class BarView: NSVisualEffectView {
         refreshReasoningControl()
     }
 
+    /// Fills the icon of the speed Codex is on; Standard or an unread button leaves both outlined.
+    func setCurrentSpeed(_ speed: ResponseSpeed?) {
+        guard speed != currentSpeed else { return }
+        currentSpeed = speed
+        refreshButtonStates()
+    }
+
     func cancelReasoningPreview() {
         previewEffort = nil
         if reasoningSlider.isTrackingPointer { dragWasInvalidated = true }
@@ -285,9 +380,11 @@ final class BarView: NSVisualEffectView {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
             button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
         }
-        for button in speedButtons.values {
+        for (speed, button) in speedButtons {
+            let active = speed == currentSpeed
             button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
-            button.contentTintColor = .labelColor
+            button.image = Self.speedImage(for: speed, filled: active)
+            button.contentTintColor = active ? .controlAccentColor : .labelColor // Same accent as the current model's pill.
         }
     }
 
@@ -314,7 +411,7 @@ final class BarView: NSVisualEffectView {
         reasoningSlider.setAccessibilityValue(value)
     }
 
-    /// Shows a short message on the right. `sticky` messages stay until replaced;
+    /// Shows a short message beside the toolbar. `sticky` messages stay until replaced;
     /// others disappear after a few seconds.
     func showStatus(_ text: String?, color: NSColor = .secondaryLabelColor, sticky: Bool = false) {
         statusHideWork?.cancel()
@@ -322,7 +419,7 @@ final class BarView: NSVisualEffectView {
             statusButton.isHidden = true
             statusButton.attributedTitle = NSAttributedString(string: "")
             statusButton.toolTip = nil
-            needsLayout = true
+            hideStatus()
             return
         }
         statusButton.attributedTitle = NSAttributedString(string: text, attributes: [
@@ -331,7 +428,7 @@ final class BarView: NSVisualEffectView {
         ])
         statusButton.isHidden = false
         statusButton.toolTip = text
-        needsLayout = true
+        placeStatus()
         if !sticky {
             let work = DispatchWorkItem { [weak self] in self?.showStatus(nil) }
             statusHideWork = work
@@ -350,12 +447,13 @@ final class BarView: NSVisualEffectView {
         onSelectSpeed?(speed)
     }
 
-    private static func speedImage(for speed: ResponseSpeed) -> NSImage {
+    private static func speedImage(for speed: ResponseSpeed, filled: Bool) -> NSImage {
+        let boltName = filled ? "bolt.fill" : "bolt" // Ethan asked for the active speed's icon to be filled in (2026-10-31, Claude session 4901285c); Ultrafast's bolts are outlined while off.
         switch speed {
         case .standard: return NSImage(systemSymbolName: "speedometer", accessibilityDescription: speed.rawValue)!
-        case .fast: return NSImage(systemSymbolName: "bolt", accessibilityDescription: speed.rawValue)!
+        case .fast: return NSImage(systemSymbolName: boltName, accessibilityDescription: speed.rawValue)!
         case .ultrafast:
-            let bolt = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)!
+            let bolt = NSImage(systemSymbolName: boltName, accessibilityDescription: nil)!
             let image = NSImage(size: NSSize(width: 20, height: 16), flipped: false) { _ in
                 bolt.draw(in: NSRect(x: 1, y: 1, width: 8, height: 14))
                 bolt.draw(in: NSRect(x: 11, y: 1, width: 8, height: 14))
