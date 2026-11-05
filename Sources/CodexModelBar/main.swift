@@ -1,11 +1,13 @@
 import AppKit
+import ApplicationServices
 
 // Exercise the final bundle's actual loader without starting AX, login items,
 // keyboard routing, a toolbar or an update check on a build/test worker.
 if CommandLine.arguments.contains("--check-packaged-launch") {
     let info = Bundle.main.infoDictionary ?? [:]
-    let value = ["packagedLaunch": "ok", "version": info["CFBundleShortVersionString"] as? String ?? "dev",
-                 "build": info["CFBundleVersion"] as? String ?? "dev"]
+    let value: [String: Any] = ["packagedLaunch": "ok", "version": info["CFBundleShortVersionString"] as? String ?? "dev",
+                 "build": info["CFBundleVersion"] as? String ?? "dev",
+                 "accessibilityTrusted": AXIsProcessTrusted()]
     let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
     print(String(decoding: data, as: UTF8.self))
     exit(0)
