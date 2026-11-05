@@ -125,8 +125,7 @@ final class WindowTrackerTests: XCTestCase {
         _ = NSApplication.shared
         let panel = BarPanel()
         defer { panel.close() }
-        let display = NSScreen.screens.first { $0.localizedName == "Built-in Retina Display" } ?? NSScreen.screens.first
-        let visible = try XCTUnwrap(display?.visibleFrame)
+        let visible = CGRect(x: 0, y: 0, width: 1600, height: 1200) // Match the other placement tests: GitHub's smaller physical display cannot contain this fixed 1000×700 Codex fixture plus a 216-point bar, so it correctly reaches the intentional no-space fallback.
         let window = CGRect(x: visible.minX + 100, y: visible.minY + 100, width: 1000, height: 700)
         let flow = CGRect(x: visible.minX + 100, y: visible.minY + 100, width: 800, height: 300)
         for hud in [flow, CGRect(x: visible.maxX - 180, y: visible.minY, width: 180, height: 600), flow] {
