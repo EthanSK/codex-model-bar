@@ -202,6 +202,16 @@ Wheel release cancels queued work through the fixed payload-free `speed-cancel` 
 
 Use actual window bounds to decide if the normal bar position is clear. A shrinking HUD can stop covering the bar while its four-point placement margin still overlaps; treating that margin as obstruction briefly sends the bar to the left edge. Reserve the margin for choosing an alternative position. The overlapping, shrinking and removed-HUD transition has regression coverage; all 158 Swift tests passed. Native recording-stop visual acceptance remains separate from automated geometry checks.
 
+## 2026-11-05 — Preserve release-runner identities and separate signing approvals
+
+- Keep GitHub Actions' bundled per-runner Node and supported install/update layout. Runner self-update replaces `runsvc.sh`; its macOS update repair looks for `externals/node24/bin/node`. Do not share, rename, re-sign or patch that vendor runtime to change consent prompts. Ordinary Model Bar versions should reuse the existing runner identity. The first new identity needs its own approval; later jobs on this runner proceeded promptly after approval.
+- Keep build/runtime tools outside Documents, Desktop and Downloads unless required. The investigation found only absolute runner PATH entries, with none resolving into those protected folders; the exact Documents access remains unknown. Do not invent a PATH repair or promise that runtime updates can never prompt again.
+- Future app-owned background helpers and permission dialogs should identify Model Bar clearly when safely achievable. `process.title` changes a process-list label, not a verified native consent name. Use a real signed, named app/helper identity when already building an app-owned helper; do not introduce a shared helper framework or modify vendor Node solely for naming. No safe small dialog-name fix was verified.
+- Keep Model Bar's Sparkle private key separate in Keychain, retaining pinned checksum-verified tools, its own `--account`, and public-key equality checks. The two observed `generate_appcast` prompts were initial approvals for different app keys; both received Always Allow. Lost approval for an unchanged key/tool pair was not proven. Do not broaden key access or export private keys.
+- If a normally authorized later release repeats the prompt for the same unchanged key/tool pair, coordinate a narrow stable-path Sparkle tool cache change with the app-updater workflow owner. Do not trigger a redundant release merely to test consent or change runner/keychain setup without a concrete recurrence.
+
+This records the completed permission investigation and owner requirements; it does not change runtime behavior or release tools.
+
 ## Signed app updates (2026-11-05)
 
 - Embed Sparkle.framework in Contents/Frameworks and add @executable_path/../Frameworks to the executable rpath. Verify the final bundle with --check-packaged-launch; a successful Swift link and codesign verification alone do not prove it loads.
