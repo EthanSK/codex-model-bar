@@ -208,9 +208,9 @@ Use actual window bounds to decide if the normal bar position is clear. A shrink
 - Keep build/runtime tools outside Documents, Desktop and Downloads unless required. The investigation found only absolute runner PATH entries, with none resolving into those protected folders; the exact Documents access remains unknown. Do not invent a PATH repair or promise that runtime updates can never prompt again.
 - Future app-owned background helpers and permission dialogs should identify Model Bar clearly when safely achievable. `process.title` changes a process-list label, not a verified native consent name. Use a real signed, named app/helper identity when already building an app-owned helper; do not introduce a shared helper framework or modify vendor Node solely for naming. No safe small dialog-name fix was verified.
 - Keep Model Bar's Sparkle private key separate in Keychain, retaining pinned checksum-verified tools, its own `--account`, and public-key equality checks. The two observed `generate_appcast` prompts were initial approvals for different app keys; both received Always Allow. Lost approval for an unchanged key/tool pair was not proven. Do not broaden key access or export private keys.
-- If a normally authorized later release repeats the prompt for the same unchanged key/tool pair, coordinate a narrow stable-path Sparkle tool cache change with the app-updater workflow owner. Do not trigger a redundant release merely to test consent or change runner/keychain setup without a concrete recurrence.
+- Ethan subsequently requested straightforward signing-tool reuse across his maintained apps. The release workflow now compares a persistent Sparkle 2.10.1 tool copy with the freshly verified SDK before invoking it. Preserve separate app keys and the existing approval; do not trigger a redundant public release merely to test consent.
 
-This records the completed permission investigation and owner requirements; it does not change runtime behavior or release tools.
+The initial investigation changed neither app behavior nor release tools. The later requested tool reuse is documented below.
 
 ## Signed app updates (2026-11-05)
 
@@ -226,3 +226,7 @@ A toolbar Accessibility row was enabled, but its saved code requirement still na
 Local builds now prefer Developer ID when available, matching the public release family instead of switching back to development signing. Explicit `CODEX_MODEL_BAR_SIGN_ID` overrides and the CI ad-hoc build remain unchanged. Keep an appropriate development/ad-hoc option for machines without a Developer ID certificate; do not bypass macOS consent or edit its privacy database to repair the transition.
 
 The native remove-and-re-add repair saved the current Developer ID requirement, which the installed app then satisfied. The existing toolbar process cleared its permission warning without restarting; do not require a Codex or bridge restart for this identity refresh. This verified permission recovery, not new acceptance of model, speed or reasoning actions.
+
+## 2026-11-05 — Reuse checksum-verified release signing tools
+
+Release workflows invoke the signing host's versioned Sparkle copy at `~/.local/share/sparkle-tools/2.10.1/bin`, after comparing it with the freshly downloaded, checksum-verified SDK. Provision this directory during signing-host setup; a missing or mismatched copy blocks signing instead of invoking an unverified or disposable helper. Keep per-app Keychain accounts and public-key checks. Reusing identical tool bytes does not promise approval survives a tool upgrade or a changed key.
