@@ -1,3 +1,4 @@
+// Speed values, passive observations and native-cycle planning shared by the toolbar.
 import Foundation
 
 /// Codex's response speed choices.
@@ -118,5 +119,28 @@ public enum SpeedCommandState: Equatable {
             let expected = "the fastest available responses for latency-sensitive work"
             return description == expected || description == expected + "." ? .disabled : nil // Live model metadata adds a period; the renderer's default description omits it.
         }
+    }
+}
+
+/// Plans the native forward-only cycle without pretending that Shift reverses it.
+/// Codex 26.1103 cycles Standard, then the model's offered tiers in catalog order.
+/// Preserve the existing controls: repeating Fast/Ultrafast toggles it off, and
+/// Standard turns the estimated active tier off. The passive estimate can be stale;
+/// Ethan prefers a best-effort request to confirmation queries or retries.
+public struct NativeSpeedPlan: Equatable {
+    public let target: ResponseSpeed
+    public let steps: [ResponseSpeed]
+    public var presses: Int { steps.count }
+
+    public init?(requested: ResponseSpeed, current: ResponseSpeed, offered: [ResponseSpeed]) {
+        let cycle = [.standard] + offered.reduce(into: [ResponseSpeed]()) { result, speed in
+            if speed != .standard && !result.contains(speed) { result.append(speed) }
+        }
+        let target: ResponseSpeed = requested == .standard || requested == current ? .standard : requested
+        guard let to = cycle.firstIndex(of: target) else { return nil }
+        self.target = target
+        let from = cycle.firstIndex(of: current) ?? -1
+        let count = from < 0 ? to + 1 : (to - from + cycle.count) % cycle.count
+        steps = (0..<count).map { cycle[(from + $0 + 1) % cycle.count] }
     }
 }

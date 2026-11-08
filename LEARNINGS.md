@@ -230,3 +230,14 @@ The native remove-and-re-add repair saved the current Developer ID requirement, 
 ## 2026-11-05 — Reuse checksum-verified release signing tools
 
 Release workflows invoke the signing host's versioned Sparkle copy at `~/.local/share/sparkle-tools/2.10.1/bin`, after comparing it with the freshly downloaded, checksum-verified SDK. Provision this directory during signing-host setup; a missing or mismatched copy blocks signing instead of invoking an unverified or disposable helper. Keep per-app Keychain accounts and public-key checks. Reusing identical tool bytes does not promise approval survives a tool upgrade or a changed key.
+
+
+## 1.2.72: native speed cycles and shared configured shortcut reader
+
+Codex 26.1103.41825 / build 25679 registers `composer.toggleFastMode` as Cycle speed with no default binding. The renderer advances `(index + 1) % options.length` through Standard plus offered Fast/Ultrafast tiers. It has no reverse direction argument. `composer.cycleReasoningEffort` wraps, while increase/decrease clamp; retain the latter for the slider and wheel.
+
+Normal speed now uses PID-targeted private native key pairs from the same focus handoff as reasoning. Repeating the requested tier still toggles Standard; mouse up/down retain Ultrafast/Fast toggle meanings. Native steps reuse the passive estimate and catalog order, with the old 100 ms gap only between two presses. No text, Return, pasteboard, new confirmation read, retry or added padding. Partial cancellation records already-posted steps. Model typing keeps its existing pacing, keyboard-owner guards and recent-model command.
+
+The full picker remains Control+Shift+M; recent models remains Control+Command+M. No saved or native menu-key-equivalent override established Option+Command+M. The full picker has no demonstrated model-search speed benefit. The speed-cycle binding is a local choice, not a hard-coded transport; the shared reader loads current bindings each request and resolves letters through the active native layout (including Command remapping). Recorder-prefix audit found the local modifier-only recorder uses Control+Option+Shift, so Control+Shift speed chords do not complete it; event transport emits no global modifier prefix.
+
+Validation and installed/public release evidence are maintained in the task's final report; isolated handler execution and event-sink tests are not claims of live Codex or physical mouse acceptance.

@@ -176,3 +176,32 @@ final class ResponseSpeedTests: XCTestCase {
     }
 
 }
+
+final class NativeSpeedPlanTests: XCTestCase {
+    func testEveryToggleAcrossBothTiersReachesTheExistingTarget() throws {
+        for offered in [[ResponseSpeed.fast], [.ultrafast], [.fast, .ultrafast], [.ultrafast, .fast]] {
+            let cycle = [ResponseSpeed.standard] + offered
+            for current in cycle {
+                for requested in cycle {
+                    let plan = try XCTUnwrap(NativeSpeedPlan(requested: requested, current: current, offered: offered))
+                    let target: ResponseSpeed = requested == .standard || requested == current ? .standard : requested
+                    XCTAssertEqual(plan.target, target)
+                    XCTAssertEqual(cycle[(cycle.firstIndex(of: current)! + plan.presses) % cycle.count], target)
+                    XCTAssertTrue((0...2).contains(plan.presses))
+                }
+            }
+        }
+    }
+    func testPartialPlansRecordEachPostedNativeStep() {
+        XCTAssertEqual(NativeSpeedPlan(requested: .ultrafast, current: .standard,
+                                       offered: [.fast, .ultrafast])?.steps, [.fast, .ultrafast])
+        XCTAssertEqual(NativeSpeedPlan(requested: .fast, current: .fast,
+                                       offered: [.fast, .ultrafast])?.steps, [.ultrafast, .standard])
+    }
+    func testUnsupportedTiersCannotBecomeAnotherSpeedAndMissingCurrentFollowsNativeFirstStep() {
+        XCTAssertNil(NativeSpeedPlan(requested: .ultrafast, current: .standard, offered: [.fast]))
+        XCTAssertEqual(NativeSpeedPlan(requested: .fast, current: .ultrafast, offered: [.fast])?.presses, 2)
+        XCTAssertEqual(NativeSpeedPlan(requested: .standard, current: .ultrafast, offered: [])?.presses, 1)
+        XCTAssertEqual(NativeSpeedPlan(requested: .standard, current: .standard, offered: [])?.presses, 0)
+    }
+}

@@ -1,17 +1,18 @@
+// Shared speed requests for the toolbar and Agentic Mouse.
 import AppKit
 import ApplicationServices
 import CodexModelBarCore
 
-/// Uses the slash route Ethan requested. Do not restore the rejected picker fallback,
-/// per-character tree scans or repeated confirmation queries (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
-/// Fast and Ultrafast use direct whole-command Unicode text/Return, not command-menu isolation.
-/// Never verify: send the best attempt and assume it worked; only keep Codex owning the keyboard for the global text events (Ethan, 2026-10-29, Claude session f9500cd2).
+/// Sends Codex's native Cycle speed shortcut for both toolbar buttons and mouse URLs.
+/// Keep the existing focus handoff, quick-ratchet cancellation and best-effort sending;
+/// never type slash text, send Return, or poll for a changed speed.
 final class SpeedSwitcher {
     enum Request { case select(ResponseSpeed), command(ResponseSpeed) }
     enum Result { case changed(ResponseSpeed), requested(ResponseSpeed), cancelled, cancelledForTyping, failed(String) }
     typealias Performer = (Request, NSRunningApplication, TimeInterval, () -> Bool) -> Result
     private let performer: Performer?
     private var speedMemory = ResponseSpeedMemory() // Main thread only: the toolbar draws from it, and commands on AX.queue read and update it in order through main.sync. Never open the picker or slash menu to discover speed (task 01a0d315-7d5e-7be0-bc08-80626ca0729b); only the watcher's passive model-button and saved-config reads feed `observedSpeed`.
+    private var offeredSpeeds: [ResponseSpeed]? // Nil until the passive watcher supplies model metadata.
     private var observedSpeed: ResponseSpeed? // What the toolbar last showed from Codex's own icon; consumed by the next command so its toggle starts from Codex's state rather than another chat's.
     private let speedMemoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Codex Model Bar/speed.txt")
@@ -50,6 +51,7 @@ final class SpeedSwitcher {
 
     /// Resolves the speed to show from the watcher's model-button read; nil when no button was read.
     func observe(iconVisible: Bool?, offered: [ResponseSpeed], saved: ResponseSpeed?) -> ResponseSpeed? {
+        if iconVisible != nil { offeredSpeeds = offered }
         let observed = iconVisible.map { speedMemory.displayedSpeed(iconVisible: $0, offered: offered, saved: saved) }
         if observed != observedSpeed {
             Log.info("speed-display icon=\(iconVisible.map(String.init) ?? "unread") offered=[\(offered.map(\.rawValue).joined(separator: ","))] saved=\(saved?.rawValue ?? "unknown") remembered=\(speedMemory.speed?.rawValue ?? "unknown") shows=\(observed?.rawValue ?? "none")") // Changes only; lets a live check confirm the passive read without Computer Use.
@@ -111,7 +113,7 @@ final class SpeedSwitcher {
         }
     }
 
-    /// Ignore only this process's posted keys, including the existing HID-source Return.
+    /// Ignore only this process's posted keys; genuine user input still cancels the handoff.
     static func isExternalInput(_ event: CGEvent?) -> Bool {
         event?.getIntegerValueField(.eventSourceUnixProcessID) != Int64(ProcessInfo.processInfo.processIdentifier)
     }
@@ -126,12 +128,20 @@ final class SpeedSwitcher {
         switch request {
         case .select(let selected), .command(let selected): speed = selected
         }
-        let toggle = DispatchQueue.main.sync { () -> ResponseSpeed in
-            if let observed = observedSpeed { speedMemory.speed = observed } // Seed from Codex's icon once per watcher read: after Fast in one chat, Fast in a Standard chat must record Fast, not Standard.
-            observedSpeed = nil // Queued ratchets behind this one follow the estimate it posts; the watcher stays suspended until they finish.
-            return speedMemory.toggle(for: speed)
+        // Read the configured command each time, just as reasoning does. Missing or
+        // unsupported bindings cancel safely; never substitute a text/Return fallback.
+        guard let shortcut = CodexShortcuts.load(.cycleSpeed) else {
+            Log.info("speed-switch phase=missing-native-binding")
+            return .cancelled
         }
-        guard let command = toggle.command else { return .changed(.standard) }
+        let plan = DispatchQueue.main.sync { () -> NativeSpeedPlan? in
+            if let observed = observedSpeed { speedMemory.speed = observed }
+            observedSpeed = nil // Later queued ratchets follow our posted estimate.
+            return NativeSpeedPlan(requested: speed, current: speedMemory.speed ?? .ultrafast,
+                                   offered: offeredSpeeds ?? [.fast, .ultrafast])
+        }
+        guard let plan else { return .changed(DispatchQueue.main.sync { speedMemory.speed ?? .standard }) }
+        guard plan.presses > 0 else { return .changed(plan.target) }
         var origin: SpeedInputFocus?
         var borrowed = false
         defer {
@@ -147,33 +157,35 @@ final class SpeedSwitcher {
         let conversation = readyInput == nil ? window.flatMap(CodexUI.speedConversation(in:)) : nil // A focused attached input skips both transcript walks; missing/flattened parent links retain the existing exact-pane lookup.
         guard isCurrent() else { return .cancelled }
         borrowed = origin != nil
-        _ = SpeedInputFocus.activate(codex, canFocus: isCurrent) // The text events below still require Codex to own the keyboard; activation itself is not a separate failure.
+        _ = SpeedInputFocus.activate(codex, canFocus: isCurrent) // The native events below still require Codex to own the keyboard; activation itself is not a separate failure.
         if readyInput == nil {
             ModelSwitcher.waitUntil(timeout: 1.5) {
                 guard isCurrent() else { return true }
                 readyInput = conversation.flatMap(CodexUI.speedInput(in:))
                     ?? AX.focusedWindow(pid: pid).flatMap(CodexUI.focusedSpeedInput(in:))
                 return readyInput != nil
-            } // Codex swaps its composer after a send; wait up to 1.5 s for it, then type into Codex's focus anyway (2026-10-29 15:53:50 "No task composer").
+            } // Codex swaps its composer after a send; wait up to 1.5 s for it, then send to Codex's focus anyway (2026-10-29 15:53:50 "No task composer").
         }
         guard isCurrent() else { return .cancelled }
         if let input = readyInput {
-            _ = SpeedInputFocus.focus(input, pid: pid, placeCaret: true,
-                                      canFocus: { isCurrent() && codex.isActive }) // Best effort; text delivery is not gated on reading the composer's focus back.
+            _ = SpeedInputFocus.focus(input, pid: pid, placeCaret: false,
+                                      canFocus: { isCurrent() && codex.isActive }) // Best effort; shortcut delivery is not gated on reading the composer's focus back.
         }
         let preparationDuration = ProcessInfo.processInfo.systemUptime - preparationStarted
         Log.info("speed-switch phase=focused route=\(readyInput == nil ? "codex-focus" : conversation == nil ? "focused-input" : "pane-lookup") preparation-ms=\(Int(preparationDuration * 1000)) region=\(CodexUI.identity(conversation)) input=\(CodexUI.identity(readyInput))")
-        guard SpeedCommandPaste.post(command, canPost: {
-            isCurrent() && codex.isActive && AX.keyboardOwnerPID() == pid // Text and Return are global, so only post while Codex owns the keyboard, never into Agent Flow or another app.
+        guard SpeedShortcut.post(shortcut, count: plan.presses, pid: pid, canPost: {
+            isCurrent() && !Keyboard.userInteracted(since: started)
+                && codex.isActive && AX.keyboardOwnerPID() == pid
+        }, didPostStep: { step in
+            DispatchQueue.main.sync {
+                speedMemory.speed = plan.steps[step]
+                saveSpeedMemory()
+            }
         }) else {
             return isCurrent() ? .failed("Codex did not receive keyboard focus") : .cancelled
         }
-        let remembered = DispatchQueue.main.sync { () -> ResponseSpeed? in
-            speedMemory.recordPostedToggle(toggle)
-            saveSpeedMemory()
-            return speedMemory.speed
-        }
+        let remembered = DispatchQueue.main.sync { speedMemory.speed }
         Log.info("speed-switch phase=remembered-speed speed=\(remembered?.rawValue ?? "unknown")")
-        return .requested(speed) // Standard repeats the remembered active toggle; no native picker, speed read or delayed verification (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        return .requested(speed) // Posting is a request, never a confirmed native outcome.
     }
 }

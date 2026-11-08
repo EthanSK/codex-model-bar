@@ -1,3 +1,4 @@
+// Changes reasoning through Codex’s configured native commands for the bar and mouse.
 import AppKit
 import ApplicationServices
 import CodexModelBarCore
@@ -77,7 +78,7 @@ final class ReasoningSwitcher {
             }
             admitted = true
             guard !Keyboard.userInteracted(since: requestedAt) else { finish(.cancelledForTyping); return }
-            guard let shortcuts = ReasoningShortcuts.load() else {
+            guard let shortcuts = CodexShortcuts.reasoning() else {
                 finish(.failed("Set reasoning shortcuts in Codex"))
                 return
             }
@@ -138,59 +139,5 @@ final class ReasoningSwitcher {
             }
             finish(.requested)
         }
-    }
-}
-
-private struct ReasoningShortcuts {
-    struct Shortcut {
-        let keyCode: CGKeyCode
-        let flags: CGEventFlags
-        let isArrow: Bool
-    }
-    let increase: Shortcut
-    let decrease: Shortcut
-
-    private struct Binding: Decodable {
-        let command: String
-        let key: String? // Codex saves disabled shortcuts as null; one unrelated disabled key must not hide the configured reasoning keys.
-    }
-
-    static func load() -> ReasoningShortcuts? {
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/keybindings.json")
-        guard let data = try? Data(contentsOf: url),
-              let bindings = try? JSONDecoder().decode([Binding].self, from: data) else { return nil }
-        func shortcut(for command: String) -> Shortcut? {
-            bindings.filter { $0.command == command }
-                .compactMap { $0.key.flatMap(parse) }
-                .sorted { $0.isArrow && !$1.isArrow }
-                .first
-        }
-        guard let increase = shortcut(for: "composer.increaseReasoningEffort"),
-              let decrease = shortcut(for: "composer.decreaseReasoningEffort") else { return nil }
-        return ReasoningShortcuts(increase: increase, decrease: decrease)
-    }
-
-    private static func parse(_ key: String) -> Shortcut? {
-        let parts = key.lowercased().split(separator: "+").map(String.init)
-        guard let last = parts.last else { return nil }
-        var flags: CGEventFlags = []
-        for part in parts.dropLast() {
-            switch part {
-            case "command", "cmd": flags.insert(.maskCommand)
-            case "control", "ctrl": flags.insert(.maskControl)
-            case "option", "alt": flags.insert(.maskAlternate)
-            case "shift": flags.insert(.maskShift)
-            default: return nil
-            }
-        }
-        let keyCode: CGKeyCode
-        switch last {
-        case "up": keyCode = 126
-        case "down": keyCode = 125
-        case "f18": keyCode = 79
-        case "f19": keyCode = 80
-        default: return nil
-        }
-        return Shortcut(keyCode: keyCode, flags: flags, isArrow: last == "up" || last == "down")
     }
 }

@@ -164,7 +164,7 @@ final class ModelSwitcher {
         // Allow the opened menu to settle before selecting; the existing live-menu
         // and focus checks below still protect the draft.
         let readyAt = ProcessInfo.processInfo.systemUptime
-        usleep(SpeedCommandPaste.commandStepDelay) // All toolbar text routes use the same 100 ms after input focus; keep the model menu's own typing route (Ethan, 2026-10-31).
+        usleep(SpeedShortcut.commandStepDelay) // All toolbar text routes use the same 100 ms after input focus; keep the model menu's own typing route (Ethan, 2026-10-31).
         guard !Keyboard.userInteracted(since: readyAt) else { return .cancelledForTyping }
 
         // Always use the previously working typed search. Ethan rejected picker
@@ -288,7 +288,7 @@ final class ModelSwitcher {
         let query = "/ultrafast"
         func inspectCommand() -> (AXUIElement, SpeedCommandState)? {
             guard sameComposer(), CodexUI.composerText(composer) == before else { return nil }
-            usleep(SpeedCommandPaste.commandStepDelay) // The combined model/speed action also lets its focused input settle before each command it types (Ethan, 2026-10-31).
+            usleep(SpeedShortcut.commandStepDelay) // The combined model/speed action also lets its focused input settle before each command it types (Ethan, 2026-10-31).
             var typed = ""
             for character in query {
                 guard !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid),
@@ -515,23 +515,4 @@ enum Keyboard {
         return true
     }
 
-    /// Builds one Unicode key pair for the whole command, without touching the clipboard.
-    static func textEvents(_ text: String) -> [CGEvent]? {
-        let source = CGEventSource(stateID: .privateState)
-        var units = Array(text.utf16)
-        var events: [CGEvent] = []
-        for keyDown in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { return nil }
-            event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
-            events.append(event)
-        }
-        return events
-    }
-
-    /// Inserts the complete slash command together; model search keeps its existing typing route.
-    static func insertUnlessTyping(_ text: String, pid: pid_t) -> Bool {
-        guard !userIsTyping(), let events = textEvents(text) else { return false }
-        for event in events { event.postToPid(pid) }
-        return true
-    }
 }
