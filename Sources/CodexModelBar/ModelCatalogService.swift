@@ -68,16 +68,21 @@ final class ModelCatalogService {
 
     /// Merge shared-cache observations, falling back to app-server if it is missing.
     /// `nil` means no source or saved catalogue is available.
-    func refresh(codexAppURL: URL?, completion: @escaping ([CodexModel]?) -> Void) {
+    func refresh(codexAppURL: URL?, forceAppServer: Bool = false, completion: @escaping ([CodexModel]?) -> Void) {
         queue.async { [self] in
             let saved = readSavedModels()
             let current = Self.readCodexCache(at: codexCacheURL)
-            let fetched = current.isEmpty ? Self.fetchFromAppServer(codexAppURL: codexAppURL) : nil
+            let fetched = (forceAppServer || current.isEmpty) ? Self.fetchFromAppServer(codexAppURL: codexAppURL) : nil
             // The real app may finish signing in while the fallback request runs.
             let latest = Self.readCodexCache(at: codexCacheURL)
             // Keep every successful observation, even if the shared file changes
             // again during this refresh. Later metadata wins for the same id.
-            let observed = Self.merge(saved: fetched ?? [], observed: Self.merge(saved: current, observed: latest))
+            let cacheObserved = Self.merge(saved: current, observed: latest)
+            // Setup asks the newly configured provider for its real catalogue;
+            // otherwise retain the existing latest-cache-wins refresh behavior.
+            let observed = forceAppServer
+                ? Self.merge(saved: cacheObserved, observed: fetched ?? [])
+                : Self.merge(saved: fetched ?? [], observed: cacheObserved)
             let models = Self.merge(saved: saved, observed: observed)
             let observedIDs = Set(observed.map(\.id))
             let retained = saved.filter { !observedIDs.contains($0.id) }.map(\.id)
