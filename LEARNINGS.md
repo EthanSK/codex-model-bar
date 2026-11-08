@@ -1,6 +1,6 @@
 # Learnings
 
-## 1.2.75: one bar per Codex window
+## 1.2.76: one bar per Codex window
 
 Ethan runs two Codex windows on two displays and asked for a bar per window (Claude session 1b5d58ef-3b64-470e-a988-9db193e242c0, 2026-11-08). The tracker still picks the AX main window, and now also lists every on-screen task window. A task window is a normal-layer Codex window of at least 480 by 360 that matches an `AXStandardWindow` frame; the main window always counts, and a known window survives a missed AX match during a drag. `CGWindowID` keys each bar, and a bar is destroyed only once its window no longer exists, so a window on another Space keeps its last reading.
 
