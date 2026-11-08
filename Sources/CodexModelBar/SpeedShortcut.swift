@@ -7,6 +7,7 @@
  ============================================================================
  */
 import AppKit
+import CodexNativeControls
 import ApplicationServices
 
 enum SpeedShortcut {
@@ -21,11 +22,7 @@ enum SpeedShortcut {
         guard (1...2).contains(count) else { return false }
         for step in 0..<count {
             if step > 0 { wait(commandStepDelay) } // Reuse the former text-to-Return gap; no added padding.
-            guard canPost() else { return false }
-            let source = CGEventSource(stateID: .privateState)
-            guard let down = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: false) else { return false }
-            for event in [down, up] { event.flags = shortcut.flags; send(event, pid) }
+            guard CodexNativeKey.post(shortcut, pid: pid, canPost: canPost, send: send) else { return false }
             didPostStep(step) // A later cancellation must retain the estimate of any step already posted.
         }
         return true // Never wait for a resulting speed or retry a posted step.

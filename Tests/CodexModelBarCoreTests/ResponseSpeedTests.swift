@@ -126,12 +126,12 @@ final class ResponseSpeedTests: XCTestCase {
                        [.fast, .ultrafast])
     }
 
-    func testMissingModelButtonIconAlwaysMeansStandard() {
+    func testHiddenFastSvgUsesSavedFastWithoutGuessingFromBarMemory() {
         var memory = ResponseSpeedMemory()
         for remembered in [nil, ResponseSpeed.standard, .fast, .ultrafast] {
             memory.speed = remembered
             for offered in [[], [ResponseSpeed.fast], [.fast, .ultrafast]] {
-                XCTAssertEqual(memory.displayedSpeed(iconVisible: false, offered: offered, saved: remembered), .standard)
+                XCTAssertEqual(memory.displayedSpeed(iconVisible: false, offered: offered, saved: remembered), remembered == .fast ? .fast : .standard)
             }
         }
     }

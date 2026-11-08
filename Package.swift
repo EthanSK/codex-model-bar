@@ -12,14 +12,16 @@ import PackageDescription
 let package = Package(
     name: "CodexModelBar",
     platforms: [.macOS(.v13)],
+    products: [.library(name: "CodexNativeControls", targets: ["CodexNativeControls"])],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
     ],
     targets: [
         .target(name: "CodexModelBarCore"),
+        .target(name: "CodexNativeControls", dependencies: ["CodexModelBarCore"]),
         .executableTarget(
             name: "CodexModelBar",
-            dependencies: ["CodexModelBarCore", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["CodexModelBarCore", "CodexNativeControls", .product(name: "Sparkle", package: "Sparkle")],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
@@ -28,7 +30,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodexModelBarUITests",
-            dependencies: ["CodexModelBar", "CodexModelBarCore"]
+            dependencies: ["CodexModelBar", "CodexModelBarCore", "CodexNativeControls"]
         ),
     ]
 )

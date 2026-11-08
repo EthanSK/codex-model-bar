@@ -1,3 +1,4 @@
+import CodexNativeControls
 import AppKit
 import ApplicationServices
 import CodexModelBarCore
@@ -448,20 +449,13 @@ final class ModelSwitcher {
 
     // MARK: - Polling helpers
 
-    /// Re-evaluates `condition` every 40 ms until true or `timeout` seconds pass.
+    /// Extraction of existing readiness polling into the shared native-control library.
     @discardableResult
     static func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
-        poll(timeout: timeout) { condition() ? true : nil } ?? false
+        CodexNativeControls.CodexControlWait.until(timeout: timeout, condition)
     }
-
-    /// Re-evaluates `body` every 40 ms until it returns a value or `timeout` passes.
     static func poll<T>(timeout: TimeInterval, _ body: () -> T?) -> T? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = body() { return value }
-            usleep(40_000)
-        } while Date() < deadline
-        return nil
+        CodexNativeControls.CodexControlWait.poll(timeout: timeout, body)
     }
 }
 

@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.74: share native code without a running companion
+
+Ethan explicitly rejected a Mouse dependency on the running Model Bar. CodexNativeControls now owns the extracted configured shortcut parser, AX transport, intended-pane lookup, focus handoff, readiness cadence, private key pair and cancellable queue. Both apps embed it. Keep host-specific passive model caches and displays in Model Bar, and host-specific unlocked-session gates in Mouse. Speed remains one forward cycle for either wheel direction; reasoning retains configured native increase/decrease.
+
+The inspected Codex 26.1103 renderer marks its inline Fast SVG aria-hidden while Ultrafast remains exposed. Installed observations showed saved=Fast with icon=false, which the previous display read as Standard. Use the saved Fast observation when an eligible model has no exposed image; retain the global-config ambiguity across chats and never turn this display fallback into target estimation or success polling. Watcher equality includes saved speed so Fast changes publish without a changed model/effort/icon.
+
 ## 1.2.73: keyboard-layout APIs need the main queue
 
 The installed 1.2.72 crash report traced a native speed request from `SpeedSwitcher.perform` on the background AX queue through `CodexShortcuts.letterKeyCode` to HIToolbox's input-source API, which asserted that it was not on the main queue. The original native-menu fixture called the parser on the main actor and missed this route. Resolve the input source and translate letter keys on the main queue, and retain a regression that invokes the real parser from AX.queue while the main run loop can service it. Arrow parsing and configured reasoning bindings are unaffected.

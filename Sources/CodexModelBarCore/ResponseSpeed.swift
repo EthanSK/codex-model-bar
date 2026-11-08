@@ -81,11 +81,14 @@ public struct ResponseSpeedMemory {
 
     /// The speed to show for a chat from Codex's model-button icon, the model's offered tiers and Codex's saved speed choice.
     ///
-    /// Codex (desktop 26.1027) draws one 14 pt icon in the model button only while Fast or Ultrafast is on, so its absence
-    /// proves Standard. Both bolts expose identical Accessibility data, so only a model offering both tiers (GPT-6.1 Sol,
+    /// Codex (desktop 26.1027) draws one 14 pt icon in the model button only while Fast or Ultrafast is on, and current versions hide Fast
+    /// from Accessibility, so absence alone cannot distinguish Fast from Standard. Both bolts expose identical Accessibility data, so only a model offering both tiers (GPT-6.1 Sol,
     /// GPT-6 Astra) needs this estimate to choose between them. Ethan asked for best-effort detection on 2026-10-31 (Claude session 4901285c); this passive read of the already-located button replaces the "never read speed from the UI" rule only for display, never to verify a sent command.
     public func displayedSpeed(iconVisible: Bool, offered: [ResponseSpeed], saved: ResponseSpeed?) -> ResponseSpeed {
-        guard iconVisible else { return .standard }
+        // Codex 26.1103 hides Fast's SVG from Accessibility (`aria-hidden`),
+        // so no exposed image is no longer proof of Standard. Its saved Fast
+        // choice is the available observation; retain Standard otherwise.
+        guard iconVisible else { return saved == .fast && (offered.isEmpty || offered.contains(.fast)) ? .fast : .standard }
         if offered.count == 1, let only = offered.first { return only } // Most models offer only Fast, so the icon alone identifies it.
         for estimate in [saved, speed] { // Codex's saved choice comes first: it also records a `/ultrafast` Ethan types in Codex, which the bar's own memory missed and showed as Fast (2026-11-03, Claude session 719981e1).
             if let estimate, estimate != .standard, offered.isEmpty || offered.contains(estimate) { return estimate }

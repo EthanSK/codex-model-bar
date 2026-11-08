@@ -1,0 +1,134 @@
+/*
+ ============================================================================
+ **MOVED FROM — MOVE HISTORY**
+ 2026-11-08: Sources/CodexModelBar/AX.swift. Extraction of existing native
+ shortcut/focus code so Model Bar and Agentic Mouse embed the same implementation
+ without depending on either running app. Task: Codex native shortcuts.
+ ============================================================================
+ */
+import AppKit
+import ApplicationServices
+import os
+
+/// Thin, synchronous helpers over the macOS Accessibility (AX) C API.
+///
+/// Codex's UI is web content inside a Chromium-based shell; Chromium publishes that
+/// content as an AX tree once an assistive client asks for it. We read it to:
+///  - find the composer's model button (`AXPopUpButton`, title like "Opus 5.5 Extra High"),
+///  - find entries in Codex's `/model` menu so we can press the exact one.
+///
+/// All calls block on IPC to Codex, so callers run them on `AX.queue`, never the
+/// main thread (a full tree walk takes ~0.5 s on a busy chat).
+public enum CodexAX {
+    /// Serial queue for every AX call, so tree walks never overlap or block the UI.
+    public static let queue = DispatchQueue(label: "com.ethansk.codex-native-controls.ax", qos: .userInitiated,
+                                    autoreleaseFrequency: .workItem) // Drain Cocoa/AX temporary objects after each read, including on this long-lived serial queue.
+
+    private static let queuedActions = OSAllocatedUnfairLock(initialState: 0) // Incremented by the queuing thread, decremented on `queue` when the action starts, read by background walks; hence the lock.
+
+    /// True while a speed, reasoning or model action waits for `queue`; the background composer poll stops its walk early.
+    public static var hasQueuedAction: Bool { queuedActions.withLock { $0 > 0 } }
+
+    /// Queues a user action so the background composer poll yields to it instead of making it wait behind a whole-window walk.
+    /// On 2026-10-28 a reasoning gesture waited 4.4 s behind one poll walk and was cancelled when it finally ran.
+    public static func enqueueAction(_ work: @escaping () -> Void) {
+        queuedActions.withLock { $0 += 1 }
+        queue.async {
+            queuedActions.withLock { $0 -= 1 }
+            work()
+        }
+    }
+
+    /// True when this app may use Accessibility (needed to read Codex and send keys).
+    public static var isTrusted: Bool { AXIsProcessTrusted() }
+
+    /// Shows macOS's "allow Accessibility" prompt (only has an effect when untrusted).
+    public static func requestTrust() {
+        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+    }
+
+    public static func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {
+        var value: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value as? T
+    }
+
+    public static func string(_ element: AXUIElement, _ name: String) -> String {
+        attribute(element, name) ?? ""
+    }
+
+    public static func role(_ element: AXUIElement) -> String { string(element, kAXRoleAttribute) }
+    public static func title(_ element: AXUIElement) -> String { string(element, kAXTitleAttribute) }
+
+    public static func children(_ element: AXUIElement) -> [AXUIElement] {
+        attribute(element, kAXChildrenAttribute) ?? []
+    }
+
+    public static func parent(_ element: AXUIElement) -> AXUIElement? {
+        attribute(element, kAXParentAttribute)
+    }
+
+    /// The element's own focused flag (for a text area: it has the caret).
+    public static func isFocused(_ element: AXUIElement) -> Bool {
+        attribute(element, kAXFocusedAttribute) ?? false
+    }
+
+    /// Actual keyboard owner, including a non-activating panel over the active app.
+    public static func keyboardOwnerPID() -> pid_t? {
+        guard let focused: AXUIElement = attribute(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute)
+        else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(focused, &pid) == .success else { return nil }
+        return pid
+    }
+
+    /// Performs the element's default action (a click, for buttons and menu items).
+    @discardableResult
+    public static func press(_ element: AXUIElement) -> Bool {
+        AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+    }
+
+    /// Asks a Chromium/Electron-style app to build its web AX tree. Screen readers do
+    /// the same; failure is harmless (some builds expose the tree regardless).
+    public static func enableWebAccessibility(pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    }
+
+    /// The window the user is working in: focused window first, then main window.
+    public static func focusedWindow(pid: pid_t) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        if let window: AXUIElement = attribute(app, kAXFocusedWindowAttribute) { return window }
+        return attribute(app, kAXMainWindowAttribute)
+    }
+
+    /// Depth-first search returning the first element that satisfies `match`.
+    /// `limit` caps the number of visited nodes so a pathological tree can't hang us.
+    public static func first(in root: AXUIElement, limit: Int = 25_000, where match: (AXUIElement) -> Bool) -> AXUIElement? {
+        var visited = 0
+        var stack: [AXUIElement] = [root]
+        while let element = stack.popLast() {
+            visited += 1
+            if visited > limit { return nil }
+            if match(element) { return element }
+            // Reverse so children are visited in document order (stack is LIFO).
+            stack.append(contentsOf: children(element).reversed())
+        }
+        return nil
+    }
+
+    /// Depth-first search collecting every element that satisfies `match`, in document order.
+    public static func all(in root: AXUIElement, limit: Int = 25_000, where match: (AXUIElement) -> Bool) -> [AXUIElement] {
+        var visited = 0
+        var found: [AXUIElement] = []
+        var stack: [AXUIElement] = [root]
+        while let element = stack.popLast() {
+            visited += 1
+            if visited > limit { break }
+            if match(element) { found.append(element) }
+            stack.append(contentsOf: children(element).reversed())
+        }
+        return found
+    }
+}

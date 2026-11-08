@@ -1,3 +1,4 @@
+import CodexNativeControls
 import AppKit
 import ApplicationServices
 import CodexModelBarCore
@@ -44,16 +45,9 @@ enum CodexUI {
         return "\(AX.role(element))#\(String(CFHash(element), radix: 16))"
     }
 
-    /// Chromium can temporarily expose a group/web area as app focus while the
-    /// input itself retains AXFocused. Never accept a different focused input.
+    /// Extraction of existing focus check; shared with the independent mouse controls.
     static func composerHasFocus(_ composer: AXUIElement, pid: pid_t) -> Bool {
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-              AX.keyboardOwnerPID() == pid,
-              let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
-        else { return false }
-        if CFEqual(focused, composer) { return true }
-        return [kAXGroupRole as String, kAXWindowRole as String, "AXWebArea"].contains(AX.role(focused))
-            && AX.isFocused(composer)
+        CodexComposerFocus.hasFocus(composer, pid: pid)
     }
 
     /// Resolve the focused input first, then a still-attached previous input.
@@ -115,40 +109,23 @@ enum CodexUI {
                        scopeAncestors: result.scopeAncestors)
     }
 
-    /// Avoid transcript discovery when Codex already identifies an attached focused chat input.
+    /// Extraction of existing pane lookup; keep the passive paired-composer hint.
     static func focusedSpeedInput(in window: AXUIElement) -> AXUIElement? {
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(window, &pid) == .success,
-              let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
-        else { return nil }
-        if let input = inputLocator.focusedInput(in: window, focused: focused) { return input }
-        guard let pairedComposer = Cache.windowForLocated.map({ CFEqual($0, window) }) == true ? Cache.located.composer : nil
-        else { return nil }
-        if CFEqual(pairedComposer, focused) { return focused } // Codex drops the Conversation landmark while a new or hidden transcript loads (2026-10-27 22:15:47 UTC: sole focused input, region=none); the composer the model lookup already paired is still this pane's input.
-        return inputLocator.regionlessInput(pairedComposer, in: window, focused: focused)
+        CodexComposerFocus.focusedInput(in: window, previousComposer: Cache.windowForLocated.map { CFEqual($0, window) } == true ? Cache.located.composer : nil)
     }
-
-    /// Capture the intended pane before activation can restore the previously used input.
     static func speedConversation(in window: AXUIElement) -> AXUIElement? {
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(window, &pid) == .success else { return nil }
-        let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
-        let previous = Cache.windowForLocated.map { CFEqual($0, window) } == true ? Cache.located.composer : nil
-        let region = inputLocator.conversation(in: window, focused: focused, previousComposer: previous)
-        Log.info("speed-pane window=\(identity(window)) focused=\(identity(focused)) previous=\(identity(previous)) region=\(identity(region))")
-        return region
+        CodexComposerFocus.conversation(in: window, previousComposer: Cache.windowForLocated.map { CFEqual($0, window) } == true ? Cache.located.composer : nil)
     }
-
-    /// Speed needs the chat input, not the model button that may mount later.
     static func speedInput(in conversation: AXUIElement) -> AXUIElement? {
-        inputLocator.input(inConversation: conversation) // The pane supplies identity; Codex changes its input label between new, working and Work-mode chats.
+        CodexComposerFocus.input(in: conversation)
     }
 
     /// Whether the composer's model button shows Codex's Fast/Ultrafast icon, read from its few children on each poll.
     ///
     /// Measured on desktop 26.1027: `AXPopUpButton "GPT-6.1 Sol High"` holds `AXImage` with DOM class
     /// `_ModelPickerTriggerInlineModeIcon_1sfbj_2` only while a faster tier is on. The icon has no title, so this cannot tell
-    /// Fast from Ultrafast; `ResponseSpeedMemory.displayedSpeed` does that. Codex's feature-flagged "daybreak" indicator uses
+    /// Fast from Ultrafast; Codex 26.1103 also marks the Fast SVG aria-hidden, so
+    /// absence is not proof of Standard. `ResponseSpeedMemory.displayedSpeed` uses the saved Fast choice. Codex's feature-flagged "daybreak" indicator uses
     /// the same class but replaces the speed icon while shown, so it would read as a faster tier.
     static func showsSpeedIcon(_ modelButton: AXUIElement) -> Bool {
         AX.children(modelButton).contains { child in
@@ -160,15 +137,6 @@ enum CodexUI {
     private static func isConversationRegion(_ node: AXUIElement) -> Bool {
         AX.string(node, kAXSubroleAttribute) == "AXLandmarkRegion"
             && AX.string(node, kAXDescriptionAttribute) == "Conversation" // Same structural identity measured by Agent Flow's pane_focuser.py; no app-version gate.
-    }
-
-    private static var inputLocator: ComposerLocator<AXUIElement> {
-        ComposerLocator(children: AX.children, parent: AX.parent,
-                        isTextArea: { AX.role($0) == kAXTextAreaRole as String },
-                        isModelButton: { _ in false }, equals: { CFEqual($0, $1) },
-                        hasKeyboardFocus: AX.isFocused,
-                        isWebArea: { AX.role($0) == "AXWebArea" },
-                        isConversationRegion: isConversationRegion)
     }
 
     /// The message box's real text (its placeholder counts as empty).

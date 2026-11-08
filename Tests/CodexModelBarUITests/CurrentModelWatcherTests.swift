@@ -59,4 +59,29 @@ final class CurrentModelWatcherTests: XCTestCase {
         wait(for: [delivered], timeout: 2)
         watcher.update(pid: nil, models: models)
     }
+    func testSavedFastPublishesEvenWhenItsSvgIsHiddenFromAccessibility() {
+        let values: [CurrentSelection] = [
+            .init(modelID: "sol", effort: "high", speedIconVisible: false, savedSpeed: .standard),
+            .init(modelID: "sol", effort: "high", speedIconVisible: false, savedSpeed: .fast),
+            .init(modelID: "sol", effort: "high", speedIconVisible: true, savedSpeed: .ultrafast),
+        ]
+        var index = 0
+        var reported: [CurrentSelection] = []
+        let delivered = expectation(description: "All three observed speeds")
+        delivered.expectedFulfillmentCount = 3
+        let models = [CodexModel(id: "sol", displayName: "Sol")]
+        let watcher = CurrentModelWatcher(readSelection: { _, _, _ in
+            defer { index += 1 }
+            return values[min(index, values.count - 1)]
+        }, isTrusted: { true }, observesFocus: false)
+        watcher.onChange = { selection in
+            reported.append(selection); delivered.fulfill()
+            if reported.count < values.count { watcher.refreshSoon() }
+            else { watcher.update(pid: nil, models: models) }
+        }
+        watcher.update(pid: 101, models: models)
+        wait(for: [delivered], timeout: 2)
+        XCTAssertEqual(reported, values)
+    }
+
 }
