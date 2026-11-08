@@ -54,6 +54,7 @@ ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$BIN_DIR/CodexModelBar" "$APP/Contents/MacOS/CodexModelBar"
 cp "$OUT/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE LICENSING.md "$APP/Contents/Resources/"
+cp Resources/setup-claude.sh "$APP/Contents/Resources/"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUMBER/" -e "s/__BUNDLE_ID__/$BUNDLE_ID/" \
   Resources/Info.plist > "$APP/Contents/Info.plist"
 

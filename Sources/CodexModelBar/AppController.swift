@@ -30,6 +30,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("startup version=\(AppInfo.version) build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "dev") pid=\(ProcessInfo.processInfo.processIdentifier)")
         Log.resourcesIfNeeded()
+        AppSetup.start { [weak self] in self?.refreshModels(forceAppServer: true) }
         updater = AppUpdater(mayInstall: { [weak self] in
             guard let self else { return false }
             return !self.switcher.isBusy && !self.reasoningSwitcher.isBusy && !self.speedSwitcher.isBusy
@@ -140,8 +141,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
 
     // MARK: - Models
 
-    private func refreshModels() {
-        catalog.refresh(codexAppURL: tracker.codexApp?.bundleURL) { [weak self] models in
+    private func refreshModels(forceAppServer: Bool = false) {
+        catalog.refresh(codexAppURL: tracker.codexApp?.bundleURL, forceAppServer: forceAppServer) { [weak self] models in
             guard let self else { return }
             if let models, !models.isEmpty {
                 self.applyModels(models)

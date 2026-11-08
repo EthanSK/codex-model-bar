@@ -16,6 +16,8 @@ jobs:
         with: {persist-credentials: false}
       - name: Test
         run: swift test --jobs 2 --scratch-path .build.noindex
+      - name: Check isolated Claude setup
+        run: python3 Tests/setup_claude_test.py
       - name: Build universal app and verify its actual loader
         run: CODEX_MODEL_BAR_SIGN_ID=- CODEX_MODEL_BAR_ARCH=universal zsh scripts/build-app.sh --no-install
       - uses: actions/upload-artifact@v4

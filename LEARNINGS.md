@@ -253,3 +253,9 @@ Normal speed now uses PID-targeted private native key pairs from the same focus 
 The full picker remains Control+Shift+M; recent models remains Control+Command+M. No saved or native menu-key-equivalent override established Option+Command+M. The full picker has no demonstrated model-search speed benefit. The speed-cycle binding is a local choice, not a hard-coded transport; the shared reader loads current bindings each request and resolves letters through the active native layout (including Command remapping). Recorder-prefix audit found the local modifier-only recorder uses Control+Option+Shift, so Control+Shift speed chords do not complete it; event transport emits no global modifier prefix.
 
 Validation and installed/public release evidence are maintained in the task's final report; isolated handler execution and event-sink tests are not claims of live Codex or physical mouse acceptance.
+
+## 2026-11-08: new Mac setup needs real shortcuts and a real Claude route
+
+Installing a signed bar does not supply Codex's optional reasoning/speed bindings: the M1 logged missing-native-binding and “Set reasoning shortcuts in Codex”. Setup now adds absent commands using the verified M5 chords, retaining disabled/custom entries and chord conflicts. Fixtures cover empty/idempotent setup, unrelated voice bindings, null keys, semantic chord collisions and malformed files. This adds no per-action delay or verification and leaves native input behavior unchanged.
+
+The M5's Opus 5.5 and Fable 5.1 entries come from claude-in-codex, not from Model Bar's cache. New setup detects Claude Code and uses that project's pinned installer; existing services and successful opt-out state remain untouched, and no credentials move between Macs. The bridge checkout must stay at its retained path because launchd runs it there. Codex must reload for its new provider/model catalogue; do not restart it during an active Voice call.
