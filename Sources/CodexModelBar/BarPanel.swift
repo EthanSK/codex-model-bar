@@ -59,8 +59,8 @@ final class BarView: NSVisualEffectView {
     var onSelect: ((CodexModel) -> Void)?
     /// Called when a reasoning tick is chosen.
     var onSelectEffort: ((String) -> Void)?
-    /// Called when a response-speed icon is clicked.
-    var onSelectSpeed: ((ResponseSpeed) -> Void)?
+    /// Ethan's single speed button cycles through Codex's available speeds.
+    var onCycleSpeed: (() -> Void)?
     /// Called when the status text is clicked (used for "Allow Accessibility access").
     var onStatusClick: (() -> Void)?
     /// Repositions the panel when the visible model list changes its required size.
@@ -76,8 +76,7 @@ final class BarView: NSVisualEffectView {
     private let reasoningSlider = ReasoningSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let separator = NSBox()
     private let speedSeparator = NSBox()
-    private let visibleSpeeds: [ResponseSpeed] = [.fast, .ultrafast] // Ethan removed the Standard icon; click the active tier again to toggle it off (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
-    private var speedButtons: [ResponseSpeed: NSButton] = [:]
+    private let speedButton = NSButton()
     private let statusButton = NSButton(title: "", target: nil, action: nil)
     private let statusPanel = BarPanel() // Ethan rejected messages replacing the reasoning slider; reuse the nonactivating panel for a separate notice (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
     private var buttons: [String: ModelButton] = [:]
@@ -109,17 +108,15 @@ final class BarView: NSVisualEffectView {
         addSubview(separator)
         speedSeparator.boxType = .separator
         addSubview(speedSeparator)
-        for speed in visibleSpeeds {
-            let button = NSButton(image: Self.speedImage(for: speed, filled: false),
-                                  target: self, action: #selector(speedClicked(_:)))
-            button.isBordered = false
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            button.toolTip = speed == .fast ? "Fast speed — more usage" : "\(speed.rawValue) speed"
-            button.setAccessibilityLabel("\(speed.rawValue) speed")
-            addSubview(button)
-            speedButtons[speed] = button
-        }
+        speedButton.target = self
+        speedButton.action = #selector(speedClicked(_:))
+        speedButton.isBordered = false
+        speedButton.imagePosition = .imageOnly
+        speedButton.imageScaling = .scaleProportionallyDown
+        speedButton.toolTip = "Cycle speed"
+        speedButton.setAccessibilityLabel("Cycle speed")
+        speedButton.image = Self.speedImage(for: .standard, filled: false)
+        addSubview(speedButton)
 
         reasoningLabel.font = .systemFont(ofSize: 11, weight: .medium)
         reasoningLabel.textColor = .secondaryLabelColor
@@ -196,11 +193,11 @@ final class BarView: NSVisualEffectView {
         1 + sectionSpacing + reasoningLabelWidth + sectionSpacing + sliderWidth
     }
 
-    private var speedWidth: CGFloat { sectionSpacing * 2 + 1 + CGFloat(visibleSpeeds.count * 24) }
+    private var speedWidth: CGFloat { sectionSpacing * 2 + 1 + 24 }
 
     private struct ControlLayout {
         let size: CGSize
-        let frames: [CGRect] // Models in display order, followed by the reasoning group and the two speed icons together.
+        let frames: [CGRect] // Models in display order, followed by the reasoning group and the single speed button.
         let separators: [CGRect?]
     }
 
@@ -212,7 +209,7 @@ final class BarView: NSVisualEffectView {
             ? CGSize(width: reasoningLabelWidth + sectionSpacing + sliderWidth, height: 26)
             : CGSize(width: max(reasoningLabelWidth, sliderWidth), height: 44)
         let sizes = modelWidths.map { CGSize(width: $0, height: 22) }
-            + [reasoningSize, CGSize(width: CGFloat(visibleSpeeds.count * 24), height: 22)]
+            + [reasoningSize, CGSize(width: 24, height: 22)]
         var rows: [[Int]] = [[]]
         var rowHeights: [CGFloat] = [0]
         var frames: [CGRect] = []
@@ -262,9 +259,7 @@ final class BarView: NSVisualEffectView {
         reasoningSlider.frame = CGRect(x: stackedReasoning ? reasoningFrame.minX : reasoningLabel.frame.maxX + sectionSpacing,
                                        y: reasoningFrame.minY, width: sliderWidth, height: stackedReasoning ? 24 : 26)
         let speedsFrame = layout.frames[models.count + 1]
-        for (index, speed) in visibleSpeeds.enumerated() {
-            speedButtons[speed]?.frame = CGRect(x: speedsFrame.minX + CGFloat(index * 24), y: speedsFrame.minY, width: 24, height: 22)
-        }
+        speedButton.frame = speedsFrame
         placeStatus()
     }
 
@@ -362,7 +357,7 @@ final class BarView: NSVisualEffectView {
         refreshReasoningControl()
     }
 
-    /// Fills the icon of the speed Codex is on; Standard or an unread button leaves both outlined.
+    /// Show the passively observed speed on the one cycle control.
     func setCurrentSpeed(_ speed: ResponseSpeed?) {
         guard speed != currentSpeed else { return }
         currentSpeed = speed
@@ -380,12 +375,10 @@ final class BarView: NSVisualEffectView {
             button.visualState = id == busyModelID ? .busy : (id == currentModelID ? .current : .normal)
             button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
         }
-        for (speed, button) in speedButtons {
-            let active = speed == currentSpeed
-            button.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
-            button.image = Self.speedImage(for: speed, filled: active)
-            button.contentTintColor = active ? .controlAccentColor : .labelColor // Same accent as the current model's pill.
-        }
+        speedButton.isEnabled = busyModelID == nil && !busyReasoning && !busySpeed
+        speedButton.image = Self.speedImage(for: currentSpeed ?? .standard, filled: currentSpeed != nil)
+        speedButton.contentTintColor = currentSpeed == .fast || currentSpeed == .ultrafast ? .controlAccentColor : .labelColor
+        speedButton.setAccessibilityValue(currentSpeed?.rawValue)
     }
 
     private func refreshReasoningControl() {
@@ -443,8 +436,7 @@ final class BarView: NSVisualEffectView {
     }
 
     @objc private func speedClicked(_ sender: NSButton) {
-        guard let speed = speedButtons.first(where: { $0.value === sender })?.key else { return }
-        onSelectSpeed?(speed)
+        onCycleSpeed?()
     }
 
     private static func speedImage(for speed: ResponseSpeed, filled: Bool) -> NSImage {

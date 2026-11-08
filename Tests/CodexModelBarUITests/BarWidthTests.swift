@@ -91,7 +91,7 @@ final class BarWidthTests: XCTestCase {
                 let speeds = descendants(bar).compactMap { $0 as? NSButton }.filter {
                     $0.accessibilityLabel()?.hasSuffix(" speed") == true
                 }
-                XCTAssertEqual(speeds.count, 2)
+                XCTAssertEqual(speeds.count, 1)
                 for button in speeds {
                     let rect = bar.convert(button.bounds, from: button)
                     XCTAssertEqual(rect.width, 24)
@@ -180,42 +180,28 @@ final class BarWidthTests: XCTestCase {
         }
     }
 
-    func testSpeedIconsSelectExplicitChoicesAndBusyBlocksOtherActions() {
+    func testSingleSpeedButtonCyclesAndBusyBlocksOtherActions() throws {
         let bar = BarView(frame: .zero)
         bar.setModels([CodexModel(id: "sol", displayName: "Sol")])
-        var selected: [ResponseSpeed] = []
-        bar.onSelectSpeed = { selected.append($0) }
+        var cycles = 0
+        bar.onCycleSpeed = { cycles += 1 }
         let speeds = bar.subviews.compactMap { $0 as? NSButton }.filter {
-            $0.accessibilityLabel()?.hasSuffix(" speed") == true
+            $0.accessibilityLabel() == "Cycle speed"
         }
-        XCTAssertEqual(speeds.map { $0.accessibilityLabel() }, ["Fast speed", "Ultrafast speed"])
-        for speed in [ResponseSpeed.fast, .ultrafast] {
-            let button = speeds.first { $0.accessibilityLabel() == "\(speed.rawValue) speed" }!
-            button.performClick(nil)
+        XCTAssertEqual(speeds.count, 1)
+        let button = try XCTUnwrap(speeds.first)
+        for current in [ResponseSpeed.standard, .fast, .ultrafast, nil] as [ResponseSpeed?] {
+            bar.setCurrentSpeed(current)
+            XCTAssertEqual(button.accessibilityValue() as? String, current?.rawValue)
+            XCTAssertEqual(button.toolTip, "Cycle speed")
             button.performClick(nil)
         }
-        XCTAssertEqual(selected, [.fast, .fast, .ultrafast, .ultrafast])
+        XCTAssertEqual(cycles, 4, "Every click sends one native cycle regardless of displayed state")
         bar.setBusySpeed(true)
-        XCTAssertTrue(speeds.allSatisfy { !$0.isEnabled })
+        XCTAssertFalse(button.isEnabled)
         XCTAssertTrue(bar.subviews.compactMap { $0 as? ModelButton }.allSatisfy { !$0.isEnabled })
         bar.setBusySpeed(false)
-        XCTAssertTrue(speeds.allSatisfy(\.isEnabled))
-    }
-
-    func testOnlyTheCurrentSpeedIconIsFilledAndTinted() {
-        let bar = BarView(frame: .zero)
-        let speeds = bar.subviews.compactMap { $0 as? NSButton }.filter {
-            $0.accessibilityLabel()?.hasSuffix(" speed") == true
-        }
-        let outlined = speeds.map { $0.image?.tiffRepresentation }
-        for current in [ResponseSpeed.fast, .ultrafast, .standard, nil] as [ResponseSpeed?] {
-            bar.setCurrentSpeed(current)
-            for (index, button) in speeds.enumerated() {
-                let active = button.accessibilityLabel() == current.map { "\($0.rawValue) speed" }
-                XCTAssertEqual(button.contentTintColor, active ? .controlAccentColor : .labelColor, "\(String(describing: current))")
-                XCTAssertEqual(button.image?.tiffRepresentation == outlined[index], !active, "Only the current tier is filled in")
-            }
-        }
+        XCTAssertTrue(button.isEnabled)
     }
 
     func testModelAndReasoningChangesKeepPreferredWidth() {

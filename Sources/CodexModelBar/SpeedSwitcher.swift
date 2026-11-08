@@ -3,17 +3,16 @@ import AppKit
 import ApplicationServices
 import CodexModelBarCore
 
-/// Sends Codex's native Cycle speed shortcut for both toolbar buttons and mouse URLs.
+/// Sends Codex's native Cycle speed shortcut for the toolbar button and mouse URLs.
 /// Keep the existing focus handoff, quick-ratchet cancellation and best-effort sending;
 /// never type slash text, send Return, or poll for a changed speed.
 final class SpeedSwitcher {
-    enum Request { case select(ResponseSpeed), command(ResponseSpeed) }
-    enum Result { case changed(ResponseSpeed), requested(ResponseSpeed), cancelled, cancelledForTyping, failed(String) }
+    enum Request { case cycle, mouseCycle }
+    enum Result { case requested, cancelled, cancelledForTyping, failed(String) }
     typealias Performer = (Request, NSRunningApplication, TimeInterval, () -> Bool) -> Result
     private let performer: Performer?
-    private var speedMemory = ResponseSpeedMemory() // Main thread only: the toolbar draws from it, and commands on AX.queue read and update it in order through main.sync. Never open the picker or slash menu to discover speed (task 01a0d315-7d5e-7be0-bc08-80626ca0729b); only the watcher's passive model-button and saved-config reads feed `observedSpeed`.
-    private var offeredSpeeds: [ResponseSpeed]? // Nil until the passive watcher supplies model metadata.
-    private var observedSpeed: ResponseSpeed? // What the toolbar last showed from Codex's own icon; consumed by the next command so its toggle starts from Codex's state rather than another chat's.
+    private var speedMemory = ResponseSpeedMemory() // Main thread only. Display fallback and the existing combined Astra action; native cycles never infer a target from this estimate.
+    private var observedSpeed: ResponseSpeed? // Used only to log changes from the passive watcher.
     private let speedMemoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Codex Model Bar/speed.txt")
     private var pendingCount = 0
@@ -46,12 +45,8 @@ final class SpeedSwitcher {
         saveSpeedMemory()
     }
 
-    /// The bar's estimate after its last command, shown until the watcher reads Codex's icon again.
-    var rememberedSpeed: ResponseSpeed? { speedMemory.speed }
-
     /// Resolves the speed to show from the watcher's model-button read; nil when no button was read.
     func observe(iconVisible: Bool?, offered: [ResponseSpeed], saved: ResponseSpeed?) -> ResponseSpeed? {
-        if iconVisible != nil { offeredSpeeds = offered }
         let observed = iconVisible.map { speedMemory.displayedSpeed(iconVisible: $0, offered: offered, saved: saved) }
         if observed != observedSpeed {
             Log.info("speed-display icon=\(iconVisible.map(String.init) ?? "unread") offered=[\(offered.map(\.rawValue).joined(separator: ","))] saved=\(saved?.rawValue ?? "unknown") remembered=\(speedMemory.speed?.rawValue ?? "unknown") shows=\(observed?.rawValue ?? "none")") // Changes only; lets a live check confirm the passive read without Computer Use.
@@ -62,7 +57,7 @@ final class SpeedSwitcher {
 
     func change(_ request: Request, codex: NSRunningApplication,
                 completion: @escaping (Result) -> Void) {
-        if case .select = request { selectionGeneration += 1 }
+        if case .cycle = request { selectionGeneration += 1 }
         let mouseGeneration = self.mouseGeneration
         let selectionGeneration = self.selectionGeneration
         // Ethan: "two attempts, usually not one". Reserve the first ratchet on
@@ -75,7 +70,7 @@ final class SpeedSwitcher {
         var interrupted = false
         var inputMonitor: Any?
         inputMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
-            if Self.isExternalInput(event.cgEvent) { interrupted = true } // Mouse URLs now borrow focus too; ignore our own HID Return but let newer user input cancel restoration for either route (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+            if Self.isExternalInput(event.cgEvent) { interrupted = true } // Mouse URLs now borrow focus too; ignore our own posted shortcut but let newer user input cancel restoration for either route (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         }
         Log.info("speed-switch attempt=\(attempt) phase=start request=\(request)")
         AX.enqueueAction {
@@ -83,16 +78,16 @@ final class SpeedSwitcher {
             func isCurrent() -> Bool {
                 DispatchQueue.main.sync {
                     switch request {
-                    case .command:
+                    case .mouseCycle:
                         return !interrupted && (admitted || self.mouseGeneration == mouseGeneration)
                             && ProcessInfo.processInfo.systemUptime - requestedAt < 2 // A slow tree read must not deliver a mouse command several seconds after the gesture.
-                    case .select: return self.selectionGeneration == selectionGeneration && !interrupted
+                    case .cycle: return self.selectionGeneration == selectionGeneration && !interrupted
                     }
                 }
             }
             let result: Result
             if !isCurrent() { result = .cancelled }
-            else if case .command = request, ProcessInfo.processInfo.systemUptime - requestedAt > 0.5 {
+            else if case .mouseCycle = request, ProcessInfo.processInfo.systemUptime - requestedAt > 0.5 {
                 result = .cancelled // Slow AX work previously replayed ratchets after release; expire them instead.
                 Log.info("speed-switch attempt=\(attempt) phase=expired")
             } else {
@@ -124,24 +119,12 @@ final class SpeedSwitcher {
         Log.info("speed-switch phase=focus active=\(codex.isActive) pid=\(pid) owner=\(AX.keyboardOwnerPID().map(String.init) ?? "none")")
         guard isCurrent() else { return .cancelled }
         guard !Keyboard.userInteracted(since: started) else { return .cancelledForTyping }
-        let speed: ResponseSpeed
-        switch request {
-        case .select(let selected), .command(let selected): speed = selected
-        }
         // Read the configured command each time, just as reasoning does. Missing or
         // unsupported bindings cancel safely; never substitute a text/Return fallback.
         guard let shortcut = CodexShortcuts.load(.cycleSpeed) else {
             Log.info("speed-switch phase=missing-native-binding")
             return .cancelled
         }
-        let plan = DispatchQueue.main.sync { () -> NativeSpeedPlan? in
-            if let observed = observedSpeed { speedMemory.speed = observed }
-            observedSpeed = nil // Later queued ratchets follow our posted estimate.
-            return NativeSpeedPlan(requested: speed, current: speedMemory.speed ?? .ultrafast,
-                                   offered: offeredSpeeds ?? [.fast, .ultrafast])
-        }
-        guard let plan else { return .changed(DispatchQueue.main.sync { speedMemory.speed ?? .standard }) }
-        guard plan.presses > 0 else { return .changed(plan.target) }
         var origin: SpeedInputFocus?
         var borrowed = false
         defer {
@@ -173,19 +156,12 @@ final class SpeedSwitcher {
         }
         let preparationDuration = ProcessInfo.processInfo.systemUptime - preparationStarted
         Log.info("speed-switch phase=focused route=\(readyInput == nil ? "codex-focus" : conversation == nil ? "focused-input" : "pane-lookup") preparation-ms=\(Int(preparationDuration * 1000)) region=\(CodexUI.identity(conversation)) input=\(CodexUI.identity(readyInput))")
-        guard SpeedShortcut.post(shortcut, count: plan.presses, pid: pid, canPost: {
+        guard SpeedShortcut.post(shortcut, count: 1, pid: pid, canPost: {
             isCurrent() && !Keyboard.userInteracted(since: started)
                 && codex.isActive && AX.keyboardOwnerPID() == pid
-        }, didPostStep: { step in
-            DispatchQueue.main.sync {
-                speedMemory.speed = plan.steps[step]
-                saveSpeedMemory()
-            }
         }) else {
             return isCurrent() ? .failed("Codex did not receive keyboard focus") : .cancelled
         }
-        let remembered = DispatchQueue.main.sync { speedMemory.speed }
-        Log.info("speed-switch phase=remembered-speed speed=\(remembered?.rawValue ?? "unknown")")
-        return .requested(speed) // Posting is a request, never a confirmed native outcome.
+        return .requested // The passive watcher supplies the actual state; do not guess a target.
     }
 }

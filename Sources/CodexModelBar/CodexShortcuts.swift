@@ -92,6 +92,11 @@ enum CodexShortcuts {
     /// characters, so retain only the Command/Option/Shift translation layers.
     /// This also respects Ethan's Dvorak–QWERTY Command input source.
     static func letterKeyCode(_ letter: String, flags: CGEventFlags) -> CGKeyCode? {
+        // HIToolbox's input-source API requires the main queue on macOS 26.
+        // Speed requests arrive on AX.queue, unlike the original menu fixture.
+        guard Thread.isMainThread else {
+            return DispatchQueue.main.sync { letterKeyCode(letter, flags: flags) }
+        }
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
               let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData),
               let bytes = CFDataGetBytePtr(unsafeBitCast(property, to: CFData.self)) else { return nil }

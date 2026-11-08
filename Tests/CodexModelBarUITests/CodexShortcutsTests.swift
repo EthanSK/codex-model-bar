@@ -4,6 +4,18 @@ import XCTest
 @testable import CodexModelBar
 
 final class CodexShortcutsTests: XCTestCase {
+    func testRealLayoutLookupFromBackgroundQueueDoesNotCrash() {
+        let completed = expectation(description: "AX background shortcut lookup")
+        let data = Data(#"[{"command":"composer.toggleFastMode","key":"Ctrl+Shift+S"}]"#.utf8)
+        AX.queue.async {
+            let shortcut = CodexShortcuts.load(.cycleSpeed, data: data)
+            XCTAssertNotNil(shortcut)
+            XCTAssertEqual(shortcut?.flags, [.maskControl, .maskShift])
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 3)
+    }
+
     func testNullEntriesAndUnsupportedKeysDoNotHideConfiguredReasoningArrows() throws {
         let data = Data(#"[{"command":"other","key":null},{"command":"composer.increaseReasoningEffort","key":"Hyper+F18"},{"command":"composer.increaseReasoningEffort","key":"Command+Control+Option+Shift+F18"},{"command":"composer.increaseReasoningEffort","key":"Ctrl+Command+Up"}]"#.utf8)
         let shortcut = try XCTUnwrap(CodexShortcuts.load(.increaseReasoning, data: data))

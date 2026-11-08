@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.73: keyboard-layout APIs need the main queue
+
+The installed 1.2.72 crash report traced a native speed request from `SpeedSwitcher.perform` on the background AX queue through `CodexShortcuts.letterKeyCode` to HIToolbox's input-source API, which asserted that it was not on the main queue. The original native-menu fixture called the parser on the main actor and missed this route. Resolve the input source and translate letter keys on the main queue, and retain a regression that invokes the real parser from AX.queue while the main run loop can service it. Arrow parsing and configured reasoning bindings are unaffected.
+
+Ethan asked for one speed control matching Codex's native cycle, replacing the earlier per-tier target estimate. Both mouse directions now request exactly one forward cycle; no reverse command exists in the inspected Codex version. Never infer a target to choose extra presses. Preserve cancellation, expiry, keyboard ownership, draft selection, and the passive display watcher.
+
 ## 1.2.28: verify in the background, never before the next click
 
 After 1.2.27 removed blocking final checks, Ethan confirmed it was much faster and asked to keep verification "optional in like a separate thread" so it does not block anything (task 01a0d315-7d5e-7be0-bc08-80626ca0729b). Checks now start only after a request has finished. Model and reasoning checks add no Accessibility reads: they wait up to 5 seconds for the existing 0.25 s watcher to report the requested selection, then show the existing failure text. A newer request, a focus change or Codex leaving the foreground ends a check silently, because the watcher may then be reading another task or nothing at all. Do not move these checks back into the switchers or make a request wait for them.

@@ -84,22 +84,22 @@ final class SpeedSwitcherTests: XCTestCase {
         var performed = 0
         let switcher = SpeedSwitcher(performer: { request, _, _, isCurrent in
             XCTAssertTrue(isCurrent())
-            guard case .command(.ultrafast) = request else {
+            guard case .mouseCycle = request else {
                 XCTFail("Only the first ratchet may run")
                 return .cancelled
             }
             performed += 1
-            return .requested(.ultrafast) // Inert sink: never focus or type in a real app.
+            return .requested // Inert sink: never focus or type in a real app.
         })
         let barrier = DispatchSemaphore(value: 0)
         AX.queue.async { barrier.wait() }
         let completed = expectation(description: "First command finishes, later queue cancels")
         completed.expectedFulfillmentCount = 2
-        switcher.change(.command(.ultrafast), codex: .current) { result in
-            guard case .requested(.ultrafast) = result else { return XCTFail("Quick release lost the first ratchet: \(result)") }
+        switcher.change(.mouseCycle, codex: .current) { result in
+            guard case .requested = result else { return XCTFail("Quick release lost the first ratchet: \(result)") }
             completed.fulfill()
         }
-        switcher.change(.command(.fast), codex: .current) { result in
+        switcher.change(.mouseCycle, codex: .current) { result in
             guard case .cancelled = result else { return XCTFail("Later queued ratchet must cancel: \(result)") }
             completed.fulfill()
         }
@@ -114,12 +114,12 @@ final class SpeedSwitcherTests: XCTestCase {
     func testOldQueuedRatchetExpiresWithoutEnteringTheApp() {
         let switcher = SpeedSwitcher(performer: { _, _, _, _ in
             XCTFail("Even the reserved first ratchet must expire before app interaction")
-            return .requested(.fast)
+            return .requested
         })
         let barrier = DispatchSemaphore(value: 0)
         AX.queue.async { barrier.wait() }
         let expired = expectation(description: "Stale command cancels")
-        switcher.change(.command(.fast), codex: .current) { result in
+        switcher.change(.mouseCycle, codex: .current) { result in
             guard case .cancelled = result else { return XCTFail("Must expire before any app interaction: \(result)") }
             expired.fulfill()
         }

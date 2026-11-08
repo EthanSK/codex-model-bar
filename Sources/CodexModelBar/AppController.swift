@@ -38,7 +38,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         panel.contentView = barView
         barView.onSelect = { [weak self] model in self?.switchTo(model) }
         barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
-        barView.onSelectSpeed = { [weak self] speed in self?.changeSpeed(to: speed) }
+        barView.onCycleSpeed = { [weak self] in self?.changeSpeed(.cycle) }
         barView.onStatusClick = { [weak self] in self?.statusClicked() }
         barView.onSizeChange = { [weak self] in
             guard let self else { return }
@@ -165,10 +165,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
 
     // MARK: - Switching
 
-    private func changeSpeed(to speed: ResponseSpeed) {
-        changeSpeed(.select(speed))
-    }
-
     private func changeSpeed(_ request: SpeedSwitcher.Request) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
@@ -179,11 +175,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             guard let self else { return }
             defer { self.updater?.resumeIfIdle() }
             switch result {
-            case .changed(let speed):
-                self.barView.showStatus("Speed: \(speed.rawValue)")
-            case .requested(let speed):
-                self.barView.showStatus("Requested \(speed.rawValue)")
-                self.barView.setCurrentSpeed(self.speedSwitcher.rememberedSpeed) // Fill the expected icon at once; the watcher's next read of Codex's icon replaces it.
+            case .requested:
+                break // Let the passive watcher draw Codex's actual speed.
             case .cancelled:
                 break
             case .cancelledForTyping:
@@ -241,10 +234,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         guard urls.count == 1, let url = urls.first, let action = MouseShortcut.action(for: url) else { return }
         switch action {
         case .speedUp:
-            changeSpeed(.command(.ultrafast))
+            changeSpeed(.mouseCycle)
             return
         case .speedDown:
-            changeSpeed(.command(.fast))
+            changeSpeed(.mouseCycle)
             return
         case .speedCancel:
             speedSwitcher.cancelMouseCommands()
