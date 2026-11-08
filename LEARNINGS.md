@@ -1,5 +1,19 @@
 # Learnings
 
+## 1.2.75: one bar per Codex window
+
+Ethan runs two Codex windows on two displays and asked for a bar per window (Claude session 1b5d58ef-3b64-470e-a988-9db193e242c0, 2026-11-08). The tracker still picks the AX main window, and now also lists every on-screen task window. A task window is a normal-layer Codex window of at least 480 by 360 that matches an `AXStandardWindow` frame; the main window always counts, and a known window survives a missed AX match during a drag. `CGWindowID` keys each bar, and a bar is destroyed only once its window no longer exists, so a window on another Space keeps its last reading.
+
+The defaults, chosen so idle windows cost nothing:
+- Idle bars keep their last reading. Only the focused window is read live and there are no background walks of idle chats. A window not used since launch shows no highlight until it is focused once. Do not add a per-window poll to fill this in.
+- A click on another window's bar raises that window (`AXMain` then `AXRaise`) on the same serial queue, then runs the existing model, reasoning or speed route. The raise waits up to 0.6 s for the focus to land and then sends anyway, following the never-verify rule; a failed raise is therefore possible and would act on the window that stayed focused.
+- A bar hides when more than half of its window is covered. Coverage counts every normal-layer window in front, not only Codex's: with Codex frontmost, an idle window behind Chrome would otherwise float its bar over Chrome, breaking the rule that the bar never floats over other apps. Visible Codex windows and already-placed bars are placement obstructions alongside Agent Flow. Windows place front to back so overlapping windows' bars cannot stack.
+- Agentic Mouse URLs keep targeting the focused window and never raise anything.
+
+A reading carries the bounds of the window it was read from, because the tracker learns about a Codex window switch later than the watcher does. `report` compares those bounds as well as the selection: two windows on the same model would otherwise never update the second bar. Busy state locks every bar, since the keyboard handoff is one at a time across the app. Switching windows inside Codex fires no app-activation notification, so `kAXFocusedWindowChanged` now requests a tracker scan.
+
+Whether a computer-use preview is `AXStandardWindow` is unmeasured; none was on screen when the window list was probed. If a preview ever grows a bar, compare its AX attributes with a task window's.
+
 ## 1.2.74: share native code without a running companion
 
 Ethan explicitly rejected a Mouse dependency on the running Model Bar. CodexNativeControls now owns the extracted configured shortcut parser, AX transport, intended-pane lookup, focus handoff, readiness cadence, private key pair and cancellable queue. Both apps embed it. Keep host-specific passive model caches and displays in Model Bar, and host-specific unlocked-session gates in Mouse. Speed remains one forward cycle for either wheel direction; reasoning retains configured native increase/decrease.

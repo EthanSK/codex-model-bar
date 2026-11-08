@@ -3,15 +3,21 @@ import ServiceManagement
 import CodexModelBarCore
 
 /// Wires everything together:
-///  - `CodexWindowTracker` tells us where the Codex window is and whether Codex is in front,
-///  - `BarPanel`/`BarView` draw the toolbar under Codex or beside the floating Flow HUD,
+///  - `CodexWindowTracker` tells us where each Codex window is and whether Codex is in front,
+///  - `BarPanel`/`BarView` draw one toolbar under each Codex window or beside the floating Flow HUD,
 ///  - `ModelCatalogService` supplies the model list,
 ///  - `CurrentModelWatcher` highlights the open chat's model,
 ///  - `ModelSwitcher` performs a switch when a button is clicked.
 final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+    /// One toolbar for one Codex window. An idle window's bar keeps its last reading: only the focused window is read live, so no extra background Accessibility walks (Ethan's multi-window default, 2026-11-08, Claude session 1b5d58ef).
+    private struct WindowBar {
+        let panel = BarPanel()
+        let view = BarView(frame: .zero)
+    }
+
     private let tracker = CodexWindowTracker()
-    private let panel = BarPanel()
-    private let barView = BarView(frame: .zero)
+    private var bars: [CGWindowID: WindowBar] = [:]
+    private var latestReading: (selection: CurrentSelection, windowBounds: CGRect)? // Kept so a window's first reading is not lost when it arrives before the tracker has listed that window.
     private let catalog = ModelCatalogService()
     private let watcher = CurrentModelWatcher()
     private let switcher = ModelSwitcher()
@@ -27,6 +33,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     private var trustTimer: Timer?
     private var lastToolbarVisibilityContext: String?
 
+    private var barViews: [BarView] { bars.values.map(\.view) }
+
+    private var visibleModels: [CodexModel] {
+        let hidden = Preferences.hiddenModelIDs
+        return allModels.filter { !$0.hidden && !hidden.contains($0.id) }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("startup version=\(AppInfo.version) build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "dev") pid=\(ProcessInfo.processInfo.processIdentifier)")
         Log.resourcesIfNeeded()
@@ -35,17 +48,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             return !self.switcher.isBusy && !self.reasoningSwitcher.isBusy && !self.speedSwitcher.isBusy
         })
         updater?.start()
-        panel.contentView = barView
-        barView.onSelect = { [weak self] model in self?.switchTo(model) }
-        barView.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort) }
-        barView.onCycleSpeed = { [weak self] in self?.changeSpeed(.cycle) }
-        barView.onStatusClick = { [weak self] in self?.statusClicked() }
-        barView.onSizeChange = { [weak self] in
-            guard let self else { return }
-            self.layout(for: self.tracker.snapshot)
-        }
-        barView.menuProvider = { [weak self] in self?.makeMenu() ?? NSMenu() }
-
         // Instant startup from the cached list, then refresh from Codex itself.
         applyModels(catalog.loadCachedModels())
         refreshModels()
@@ -66,16 +68,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             self?.refreshModels()
         }
 
-        watcher.onChange = { [weak self] selection in
-            guard let self else { return }
-            self.barView.setCurrentSelection(selection)
-            let offered = self.allModels.first { $0.id == selection.modelID }?.speedTiers ?? []
-            self.barView.setCurrentSpeed(self.speedSwitcher.observe(iconVisible: selection.speedIconVisible, offered: offered,
-                                                                    saved: selection.savedSpeed))
+        watcher.onChange = { [weak self] selection, windowBounds in
+            guard let self, let windowBounds else { return } // With no window to credit it to, every bar keeps its last reading.
+            self.latestReading = (selection, windowBounds)
+            self.applyLatestReading()
         }
         watcher.onFocusChange = { [weak self] in
-            self?.barView.cancelReasoningPreview()
+            self?.barViews.forEach { $0.cancelReasoningPreview() }
         }
+        watcher.onFocusedWindowChange = { [weak self] in self?.tracker.fullScan() }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start() // Click-to-focus was removed after unreliable live targeting; do not restore a guessed pane resolver (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
 
@@ -89,46 +90,99 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
 
     // MARK: - Layout and visibility
 
-    /// Positions or hides the bar for the latest tracker snapshot.
+    /// Positions or hides one bar per Codex window for the latest tracker snapshot.
     private func layout(for snapshot: CodexWindowTracker.Snapshot) {
         watcher.update(pid: snapshot.codexIsFrontmost ? snapshot.codexPID : nil, models: allModels)
 
-        let windowScreen = snapshot.windowFrame.flatMap { screen(containing: $0) }
-        let flow = windowScreen.flatMap { screen -> CGRect? in
-            guard let window = snapshot.windowFrame else { return nil }
-            barView.availableWidth = screen.visibleFrame.width // Measure the normal strip every time; using the already-moved/wrapped bar would alternate between anchors.
-            let normalFrame = BarPlacement.place(window: window, visibleFrame: screen.visibleFrame,
-                                                 contentSize: barView.preferredSize)
-            return snapshot.agentFlowHUDFrame(overlapping: normalFrame) // Ethan only wants the bar beside Flow when Flow covers its normal position (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        let shownWindows = snapshot.shouldShowToolbar ? snapshot.taskWindows.filter { !$0.isMostlyCovered } : [] // A covered window's bar hides; it would otherwise float over the window hiding it (Ethan's multi-window default, Claude session 1b5d58ef).
+        var shownWindowIDs = Set<CGWindowID>()
+        var placedBarFrames: [CGRect] = [] // Frontmost windows place first, so two overlapping windows' bars cannot land on each other.
+        var barContexts: [String] = []
+        var barResults: [String] = []
+        var madeBar = false
+        for window in shownWindows {
+            guard let windowScreen = screen(containing: window.frame) else { continue }
+            let existingBar = bars[window.id]
+            let bar = existingBar ?? makeBar(for: window.id)
+            madeBar = madeBar || existingBar == nil
+            bar.view.availableWidth = windowScreen.visibleFrame.width // Measure the normal strip every time; using the already-moved/wrapped bar would alternate between anchors.
+            let normalFrame = BarPlacement.place(window: window.frame, visibleFrame: windowScreen.visibleFrame,
+                                                 contentSize: bar.view.preferredSize)
+            let flow = snapshot.agentFlowHUDFrame(overlapping: normalFrame) // Ethan only wants the bar beside Flow when Flow covers its normal position (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+            let targetScreen = flow.flatMap { screen(containing: $0) } ?? windowScreen
+            let obstructingWindows = snapshot.agentFlowPanelFrames + shownWindows.filter { $0.id != window.id }.map(\.frame) + placedBarFrames // A covered window is left out: its bar is hidden and most of it cannot be seen, so a bar need not dodge it.
+            bar.view.availableWidth = targetScreen.visibleFrame.width // Measure the normal horizontal row first; the placement rule compares both windows before choosing any narrower region.
+            let frame = BarPlacement.place(
+                window: window.frame,
+                visibleFrame: targetScreen.visibleFrame,
+                contentSize: bar.view.preferredSize,
+                agentFlowHUD: flow,
+                obstructingWindows: obstructingWindows,
+                contentSizeForWidth: { width in
+                    bar.view.availableWidth = width
+                    return bar.view.preferredSize
+                }
+            )
+            bar.view.availableWidth = frame.width // Drawing uses the same width that fitted the selected clear region, never the last rejected candidate.
+            bar.view.obstructingWindows = [window.frame] + obstructingWindows // Floating notices must avoid the same Codex/Flow content as the toolbar.
+            bar.panel.place(frame: frame, obstructingWindows: snapshot.agentFlowPanelFrames) // Only Flow's panels raise the bar's level; other Codex windows are normal level, below it already.
+            placedBarFrames.append(frame)
+            shownWindowIDs.insert(window.id)
+            barContexts.append("\(window.id):has-flow=\(flow != nil):display=\(targetScreen.localizedName)")
+            barResults.append("\(window.id):frame=\(frame):level=\(bar.panel.level.rawValue)")
         }
-        let targetScreen = flow.flatMap { screen(containing: $0) } ?? windowScreen
-        let visible = snapshot.shouldShowToolbar && targetScreen != nil
-        let context = "requested=\(visible) codex-frontmost=\(snapshot.codexIsFrontmost) codex-context=\(snapshot.toolbarContextIsActive) frontmost-pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) task-window=\(snapshot.windowFrame != nil) has-flow=\(flow != nil) display=\(targetScreen?.localizedName ?? "none")"
-        defer {
-            if lastToolbarVisibilityContext != context {
-                Log.info("toolbar-presentation \(context) flow-panels=\(snapshot.agentFlowPanelFrames.count) hud=\(String(describing: flow)) frame=\(panel.frame) level=\(panel.level.rawValue) panel-visible=\(panel.isVisible) app-hidden=\(NSApp.isHidden)") // Log the result and chosen display on visibility/context changes, without logging every drag frame.
-                lastToolbarVisibilityContext = context
-            }
+        for (id, bar) in bars where !shownWindowIDs.contains(id) {
+            bar.panel.orderOut(nil)
+            if !CodexWindowTracker.windowExists(id) { bars[id] = nil } // Only a closed window loses its bar; another Space or a minimise keeps the last reading for its return.
         }
-        guard visible, let window = snapshot.windowFrame, let screen = targetScreen else {
-            panel.orderOut(nil)
-            return
+        if madeBar { applyLatestReading() }
+
+        let context = "requested=\(snapshot.shouldShowToolbar) codex-frontmost=\(snapshot.codexIsFrontmost) codex-context=\(snapshot.toolbarContextIsActive) frontmost-pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) task-windows=\(snapshot.taskWindows.count) shown=[\(barContexts.joined(separator: ","))]"
+        if lastToolbarVisibilityContext != context {
+            Log.info("toolbar-presentation \(context) flow-panels=\(snapshot.agentFlowPanelFrames.count) bars=[\(barResults.joined(separator: ","))] app-hidden=\(NSApp.isHidden)") // Log the result and chosen display on visibility/context changes, without logging every drag frame.
+            lastToolbarVisibilityContext = context
         }
-        barView.availableWidth = screen.visibleFrame.width // Measure the normal horizontal row first; the placement rule compares both windows before choosing any narrower region.
-        let frame = BarPlacement.place(
-            window: window,
-            visibleFrame: screen.visibleFrame,
-            contentSize: barView.preferredSize,
-            agentFlowHUD: flow,
-            obstructingWindows: snapshot.agentFlowPanelFrames,
-            contentSizeForWidth: { width in
-                self.barView.availableWidth = width
-                return self.barView.preferredSize
-            }
-        )
-        barView.availableWidth = frame.width // Drawing uses the same width that fitted the selected clear region, never the last rejected candidate.
-        barView.obstructingWindows = [window] + snapshot.agentFlowPanelFrames // Floating notices must avoid the same Codex/Flow content as the toolbar.
-        panel.place(frame: frame, obstructingWindows: snapshot.agentFlowPanelFrames)
+    }
+
+    /// Builds the bar for a newly seen window, already showing the current model list.
+    private func makeBar(for windowID: CGWindowID) -> WindowBar {
+        let bar = WindowBar()
+        bar.panel.contentView = bar.view
+        bar.view.onSelect = { [weak self] model in self?.switchTo(model, from: windowID) }
+        bar.view.onSelectEffort = { [weak self] effort in self?.changeEffort(to: effort, from: windowID) }
+        bar.view.onCycleSpeed = { [weak self] in self?.changeSpeed(.cycle, from: windowID) }
+        bar.view.onStatusClick = { [weak self] in self?.statusClicked() }
+        bar.view.menuProvider = { [weak self] in self?.makeMenu() ?? NSMenu() }
+        bar.view.setCatalogModels(allModels)
+        bar.view.setModels(visibleModels)
+        bar.view.onSizeChange = { [weak self] in // Set after the first `setModels` so building a bar inside `layout` cannot restart it.
+            guard let self else { return }
+            self.layout(for: self.tracker.snapshot)
+        }
+        if lastTrusted == false { showAccessibilityStatus(on: bar.view) }
+        bars[windowID] = bar
+        return bar
+    }
+
+    /// Shows the watcher's newest reading on the bar of the window it came from.
+    private func applyLatestReading() {
+        guard let reading = latestReading,
+              let window = tracker.snapshot.taskWindow(matching: reading.windowBounds), let bar = bars[window.id] else { return }
+        bar.view.setCurrentSelection(reading.selection)
+        let offered = allModels.first { $0.id == reading.selection.modelID }?.speedTiers ?? []
+        bar.view.setCurrentSpeed(speedSwitcher.observe(iconVisible: reading.selection.speedIconVisible, offered: offered,
+                                                       saved: reading.selection.savedSpeed))
+    }
+
+    /// The bar that reports an action: the clicked bar, or the focused window's for Agentic Mouse URLs.
+    private func actingBar(for windowID: CGWindowID?) -> BarView? {
+        (windowID ?? tracker.snapshot.focusedWindowID).flatMap { bars[$0]?.view }
+    }
+
+    /// A click on another window's bar acts on that window. The raise runs on the queue every switcher uses, so the action queued next finds it focused (Ethan's multi-window default, Claude session 1b5d58ef). Agentic Mouse passes nil and keeps targeting the focused window.
+    private func raiseWindow(_ windowID: CGWindowID?, pid: pid_t) {
+        guard let windowID, let bounds = tracker.snapshot.taskWindows.first(where: { $0.id == windowID })?.bounds else { return }
+        AX.enqueueAction { CodexWindowTracker.raise(windowAt: bounds, pid: pid) }
     }
 
     /// The screen showing most of the window.
@@ -146,7 +200,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             if let models, !models.isEmpty {
                 self.applyModels(models)
             } else if self.allModels.isEmpty {
-                self.barView.showStatus("Failed to load models", color: .systemOrange)
+                self.barViews.forEach { $0.showStatus("Failed to load models", color: .systemOrange) }
             }
         }
     }
@@ -157,20 +211,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         allModels = models
         let hidden = Preferences.hiddenModelIDs
         Log.info("catalog-apply known=[\(models.map(\.id).joined(separator: ","))] visible=[\(models.filter { !$0.hidden && !hidden.contains($0.id) }.map(\.id).joined(separator: ","))]")
-        barView.setCatalogModels(allModels)
-        barView.setModels(allModels.filter { !$0.hidden && !hidden.contains($0.id) })
+        barViews.forEach {
+            $0.setCatalogModels(allModels)
+            $0.setModels(visibleModels)
+        }
         watcher.update(pid: tracker.snapshot.codexIsFrontmost ? tracker.snapshot.codexPID : nil, models: allModels)
         layout(for: tracker.snapshot)
     }
 
     // MARK: - Switching
 
-    private func changeSpeed(_ request: SpeedSwitcher.Request) {
+    private func changeSpeed(_ request: SpeedSwitcher.Request, from windowID: CGWindowID? = nil) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
-        barView.setBusySpeed(true)
-        barView.showStatus(nil)
+        let bar = actingBar(for: windowID)
+        barViews.forEach { $0.setBusySpeed(true) } // One keyboard handoff at a time across the whole app, so every bar locks.
+        bar?.showStatus(nil)
         watcher.setSuspended(true)
+        raiseWindow(windowID, pid: codex.processIdentifier)
         speedSwitcher.change(request, codex: codex) { [weak self] result in
             guard let self else { return }
             defer { self.updater?.resumeIfIdle() }
@@ -180,51 +238,53 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             case .cancelled:
                 break
             case .cancelledForTyping:
-                self.barView.showStatus("Speed change cancelled while typing", color: .systemOrange)
+                bar?.showStatus("Speed change cancelled while typing", color: .systemOrange)
             case .failed(let reason):
-                self.barView.showStatus(reason, color: .systemOrange)
+                bar?.showStatus(reason, color: .systemOrange)
             }
             if !self.speedSwitcher.isBusy {
-                self.barView.setBusySpeed(false)
+                self.barViews.forEach { $0.setBusySpeed(false) }
                 self.watcher.setSuspended(false)
                 self.watcher.refreshSoon()
             }
         }
     }
 
-    private func changeEffort(to effort: String) {
-        guard let modelID = barView.currentModelIdentifier else { return }
-        changeEffort(.select(effort, modelID: modelID))
+    private func changeEffort(to effort: String, from windowID: CGWindowID) {
+        guard let modelID = bars[windowID]?.view.currentModelIdentifier else { return }
+        changeEffort(.select(effort, modelID: modelID), from: windowID)
     }
 
     /// The slider and Agentic Mouse use the same pane discovery, focus handoff and configured shortcuts.
-    private func changeEffort(_ request: ReasoningSwitcher.Request) {
+    private func changeEffort(_ request: ReasoningSwitcher.Request, from windowID: CGWindowID? = nil) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
-        barView.setBusyReasoning(true)
-        barView.showStatus(nil)
+        let bar = actingBar(for: windowID)
+        barViews.forEach { $0.setBusyReasoning(true) }
+        bar?.showStatus(nil)
         watcher.setSuspended(true)
+        raiseWindow(windowID, pid: codex.processIdentifier)
         reasoningSwitcher.change(request, allModels: allModels, codex: codex) { [weak self] result in
             guard let self else { return }
             defer { self.updater?.resumeIfIdle() }
             switch result {
             case .changed(let selection):
-                self.barView.setCurrentSelection(selection)
+                bar?.setCurrentSelection(selection)
                 self.watcher.refreshSoon()
             case .requested:
                 self.watcher.refreshSoon() // Never verify: the bar assumes the keys worked and simply shows Codex's next label (Ethan, 2026-10-29, Claude session f9500cd2).
             case .cancelledForTyping:
-                self.barView.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
+                bar?.showStatus("Reasoning change cancelled while typing", color: .systemOrange)
                 self.watcher.refreshSoon()
             case .cancelled:
                 break
             case .failed(let reason):
                 Log.info("reasoning change \(request) failed: \(reason)")
-                self.barView.showStatus(reason, color: .systemOrange)
+                bar?.showStatus(reason, color: .systemOrange)
                 self.watcher.refreshSoon()
             }
             if !self.reasoningSwitcher.isBusy {
-                self.barView.setBusyReasoning(false)
+                self.barViews.forEach { $0.setBusyReasoning(false) }
                 self.watcher.setSuspended(false)
             }
         }
@@ -254,50 +314,52 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         case .astraUltrafast: break
         }
         guard let model = allModels.first(where: { $0.id == MouseShortcut.astraModelID }) else {
-            barView.showStatus("GPT-6 Astra is unavailable", color: .systemOrange)
+            actingBar(for: nil)?.showStatus("GPT-6 Astra is unavailable", color: .systemOrange)
             return
         }
         Log.info("mouse-shortcut request=astra-ultrafast")
         switchTo(model, enableUltrafast: true)
     }
 
-    private func switchTo(_ model: CodexModel, enableUltrafast: Bool = false) {
+    private func switchTo(_ model: CodexModel, enableUltrafast: Bool = false, from windowID: CGWindowID? = nil) {
         guard AX.isTrusted else {
             updateTrustStatus(prompt: true)
             return
         }
         guard let codex = tracker.codexApp else { return }
-        barView.setBusyModel(id: model.id)
-        barView.showStatus(nil)
+        let bar = actingBar(for: windowID)
+        barViews.forEach { $0.setBusyModel(id: model.id) }
+        bar?.showStatus(nil)
         watcher.setSuspended(true)
+        raiseWindow(windowID, pid: codex.processIdentifier)
         switcher.switchModel(to: model, allModels: allModels, codex: codex, enableUltrafast: enableUltrafast) { [weak self] result in
             guard let self else { return }
             defer { self.updater?.resumeIfIdle() }
-            self.barView.setBusyModel(id: nil)
+            self.barViews.forEach { $0.setBusyModel(id: nil) }
             switch result {
             case .switched(let selection), .alreadyCurrent(let selection):
-                self.barView.setCurrentSelection(selection)
+                bar?.setCurrentSelection(selection)
                 if enableUltrafast {
                     self.speedSwitcher.rememberSpeed(.ultrafast)
-                    self.barView.showStatus("Astra Ultrafast enabled", color: .systemBlue)
+                    bar?.showStatus("Astra Ultrafast enabled", color: .systemBlue)
                 }
                 self.watcher.refreshSoon()
             case .requested:
                 self.watcher.refreshSoon() // The ordinary switch ends at Return; do not fabricate a model highlight from the requested target.
             case .cancelledForTyping:
                 // The switcher stops rather than send keys while real keys are going down.
-                self.barView.showStatus("Switch cancelled while typing", color: .systemOrange)
+                bar?.showStatus("Switch cancelled while typing", color: .systemOrange)
                 self.watcher.refreshSoon()
             case .failed(let reason, let searchLeft?):
                 // The model search could not be removed without risking the user's own
                 // text, so tell them exactly what to delete; stays until the next switch.
                 Log.info("switch to \(model.id) failed: \(reason)")
-                self.barView.showStatus("Switch failed. Remove \"\(searchLeft)\" from message box",
-                                        color: .systemRed, sticky: true)
+                bar?.showStatus("Switch failed. Remove \"\(searchLeft)\" from message box",
+                                color: .systemRed, sticky: true)
                 self.watcher.refreshSoon()
             case .failed(let reason, nil):
                 Log.info("switch to \(model.id) failed: \(reason)")
-                self.barView.showStatus(enableUltrafast ? reason : "Failed to switch to \(model.displayName)", color: .systemRed)
+                bar?.showStatus(enableUltrafast ? reason : "Failed to switch to \(model.displayName)", color: .systemRed)
                 self.watcher.refreshSoon()
             }
             self.watcher.setSuspended(false)
@@ -317,11 +379,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         guard trusted != lastTrusted else { return }
         lastTrusted = trusted
         if trusted {
-            barView.showStatus(nil)
+            barViews.forEach { $0.showStatus(nil) }
             watcher.refreshSoon()
         } else {
-            barView.showStatus("Allow Accessibility access to switch models", color: .systemOrange, sticky: true)
+            barViews.forEach(showAccessibilityStatus(on:))
         }
+    }
+
+    private func showAccessibilityStatus(on view: BarView) {
+        view.showStatus("Allow Accessibility access to switch models", color: .systemOrange, sticky: true)
     }
 
     private func statusClicked() {
@@ -386,7 +452,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         var hidden = Preferences.hiddenModelIDs
         if hidden.contains(id) { hidden.remove(id) } else { hidden.insert(id) }
         Preferences.hiddenModelIDs = hidden
-        barView.setModels(allModels.filter { !$0.hidden && !hidden.contains($0.id) })
+        barViews.forEach { $0.setModels(visibleModels) }
         layout(for: tracker.snapshot)
     }
 

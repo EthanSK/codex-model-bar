@@ -218,6 +218,39 @@ final class BarPlacementTests: XCTestCase {
     private let size = CGSize(width: 142, height: 216)
     private let codex = CGRect(x: 100, y: 400, width: 1400, height: 700)
 
+    func testCoverageNeedsMoreThanHalfTheWindowHidden() {
+        let window = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        XCTAssertFalse(BarPlacement.isMostlyCovered(window, by: []))
+        XCTAssertFalse(BarPlacement.isMostlyCovered(window, by: [CGRect(x: 0, y: 0, width: 500, height: 800)]), "Exactly half is not mostly")
+        XCTAssertTrue(BarPlacement.isMostlyCovered(window, by: [CGRect(x: 0, y: 0, width: 501, height: 800)]))
+        XCTAssertTrue(BarPlacement.isMostlyCovered(window, by: [CGRect(x: -50, y: -50, width: 1200, height: 1000)]))
+        XCTAssertFalse(BarPlacement.isMostlyCovered(window, by: [CGRect(x: 2000, y: 0, width: 1000, height: 800)]), "A window on another display hides nothing")
+    }
+
+    func testFrontWindowsThatOverlapEachOtherAreNotCountedTwice() {
+        let window = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let first = CGRect(x: 0, y: 0, width: 400, height: 800)
+        XCTAssertFalse(BarPlacement.isMostlyCovered(window, by: [first, first.offsetBy(dx: 50, dy: 0)]), "Together they hide 45%, not 80%")
+        XCTAssertTrue(BarPlacement.isMostlyCovered(window, by: [first, CGRect(x: 400, y: 0, width: 200, height: 800)]))
+    }
+
+    func testBarAvoidsAnotherCodexWindowBelowItsOwn() {
+        let window = CGRect(x: 100, y: 500, width: 800, height: 600)
+        let other = CGRect(x: 100, y: 100, width: 800, height: 390)
+        let result = BarPlacement.place(window: window, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30), obstructingWindows: [other])
+        XCTAssertFalse(result.intersects(other))
+        XCTAssertFalse(result.intersects(window))
+        XCTAssertTrue(visible.contains(result))
+    }
+
+    func testAClearNormalSpotIgnoresAnUnrelatedCodexWindow() {
+        let window = CGRect(x: 100, y: 500, width: 800, height: 600)
+        let normal = BarPlacement.place(window: window, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30))
+        let result = BarPlacement.place(window: window, visibleFrame: visible, contentSize: CGSize(width: 700, height: 30),
+                                        obstructingWindows: [CGRect(x: 1000, y: 100, width: 900, height: 900)])
+        XCTAssertEqual(result, normal)
+    }
+
     func testRightOfFlowCannotCoverTheCodexWindow() {
         let flow = CGRect(x: 200, y: 200, width: 1100, height: 700)
         let result = BarPlacement.place(window: codex, visibleFrame: visible, contentSize: size, agentFlowHUD: flow)

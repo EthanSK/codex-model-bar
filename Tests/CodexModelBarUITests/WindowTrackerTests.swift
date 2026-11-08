@@ -239,6 +239,59 @@ final class WindowTrackerTests: XCTestCase {
         XCTAssertTrue(frames.allSatisfy { $0 == frames[0] }, "The moved bar clearing Flow must not make the next update snap back")
     }
 
+    func testEveryStandardWindowGetsABarFrontmostFirstButAPreviewDoesNot() {
+        let other = CGRect(x: 2000, y: 100, width: 1000, height: 800)
+        let infos = [window(2, frame: previewFrame), window(1, frame: mainFrame), window(3, frame: other)]
+        let found = CodexWindowTracker.taskWindows(in: infos, pid: 42, standardWindowFrames: [mainFrame, other],
+                                                   chosenWindowID: 1, previousWindowIDs: [])
+        XCTAssertEqual(found.map(\.id), [1, 3])
+        XCTAssertEqual(found.map(\.bounds), [mainFrame, other])
+    }
+
+    func testAMissedAccessibilityReadKeepsKnownWindowsButAddsNoNewOnes() {
+        let other = CGRect(x: 2000, y: 100, width: 1000, height: 800)
+        let infos = [window(1, frame: mainFrame), window(3, frame: other), window(4, frame: previewFrame)]
+        let found = CodexWindowTracker.taskWindows(in: infos, pid: 42, standardWindowFrames: [], chosenWindowID: 1, previousWindowIDs: [3])
+        XCTAssertEqual(found.map(\.id), [1, 3])
+    }
+
+    func testBeforeAccessibilityOnlyThePermissionBarsWindowIsListed() {
+        let other = CGRect(x: 2000, y: 100, width: 1000, height: 800)
+        let found = CodexWindowTracker.taskWindows(in: [window(1, frame: mainFrame), window(3, frame: other)], pid: 42,
+                                                   standardWindowFrames: [], chosenWindowID: 1, previousWindowIDs: [])
+        XCTAssertEqual(found.map(\.id), [1])
+    }
+
+    func testAnotherAppCoveringAWindowCountsLikeAnotherCodexWindow() {
+        let codex = CGRect(x: 2000, y: 100, width: 1000, height: 800)
+        var chrome = window(50, frame: codex.insetBy(dx: 10, dy: 10), pid: 99)
+        chrome[kCGWindowLayer as String] = 0
+        var floatingHUD = window(51, frame: codex, pid: 98)
+        floatingHUD[kCGWindowLayer as String] = NSWindow.Level.floating.rawValue
+        let covered = CodexWindowTracker.taskWindows(in: [chrome, window(3, frame: codex)], pid: 42, standardWindowFrames: [codex],
+                                                     chosenWindowID: nil, previousWindowIDs: [])
+        XCTAssertEqual(covered.first?.isMostlyCovered, true, "A bar must not float over Chrome covering an idle Codex window")
+        let clear = CodexWindowTracker.taskWindows(in: [floatingHUD, window(3, frame: codex)], pid: 42, standardWindowFrames: [codex],
+                                                   chosenWindowID: nil, previousWindowIDs: [])
+        XCTAssertEqual(clear.first?.isMostlyCovered, false, "Flow's floating panels are handled by placement, not hiding")
+    }
+
+    func testAReadingFindsItsWindowDespiteRoundingAndIgnoresAnUnlistedWindow() {
+        var snapshot = CodexWindowTracker.Snapshot(codexPID: 42, windowFrame: mainFrame, codexIsFrontmost: true)
+        let other = CGRect(x: 2000, y: 100, width: 1000, height: 800)
+        snapshot.taskWindows = [.init(id: 1, bounds: mainFrame, frame: mainFrame, isMostlyCovered: false),
+                                .init(id: 3, bounds: other, frame: other, isMostlyCovered: false)]
+        XCTAssertEqual(snapshot.taskWindow(matching: other.offsetBy(dx: 1.5, dy: -1))?.id, 3)
+        XCTAssertNil(snapshot.taskWindow(matching: previewFrame))
+    }
+
+    func testBarsStayUpWhileTheFocusedWindowIsBeingReplaced() {
+        var snapshot = CodexWindowTracker.Snapshot(codexPID: 42, windowFrame: nil, codexIsFrontmost: true)
+        XCTAssertFalse(snapshot.shouldShowToolbar)
+        snapshot.taskWindows = [.init(id: 3, bounds: mainFrame, frame: mainFrame, isMostlyCovered: false)]
+        XCTAssertTrue(snapshot.shouldShowToolbar, "Closing one window must not blink the other window's bar")
+    }
+
     private func window(_ id: CGWindowID, frame: CGRect, pid: pid_t = 42) -> [String: Any] {
         [kCGWindowNumber as String: id, kCGWindowOwnerPID as String: pid,
          kCGWindowLayer as String: 0, kCGWindowAlpha as String: 1.0,

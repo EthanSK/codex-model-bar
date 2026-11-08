@@ -5,9 +5,10 @@ import CodexModelBarCore
 /// Follows the active composer without allowing slow AX reads to queue up or
 /// publish a selection from a window/focus context the user has already left.
 final class CurrentModelWatcher {
-    typealias Reader = (pid_t, [CodexModel], Bool) -> CurrentSelection?
-    var onChange: ((CurrentSelection) -> Void)?
+    typealias Reader = (pid_t, [CodexModel], Bool) -> (selection: CurrentSelection?, windowBounds: CGRect?)
+    var onChange: ((CurrentSelection, CGRect?) -> Void)? // The second value is the bounds of the window the reading came from: only the focused window is read, and only its bar updates (Claude session 1b5d58ef).
     var onFocusChange: (() -> Void)?
+    var onFocusedWindowChange: (() -> Void)?
 
     private var pid: pid_t?
     private var models: [CodexModel] = []
@@ -15,6 +16,7 @@ final class CurrentModelWatcher {
     private var observer: AXObserver?
     private var observedApplication: AXUIElement?
     private var lastReported: CurrentSelection?
+    private var lastReportedWindowBounds: CGRect?
     private var revision = 0
     private var inFlight = false
     private var forcePending = false
@@ -83,9 +85,10 @@ final class CurrentModelWatcher {
         removeObserver()
         guard observesFocus, isTrusted(), let pid else { return }
         var created: AXObserver?
-        guard AXObserverCreate(pid, { _, _, _, context in
+        guard AXObserverCreate(pid, { _, _, notification, context in
             guard let context else { return }
             let watcher = Unmanaged<CurrentModelWatcher>.fromOpaque(context).takeUnretainedValue()
+            if CFEqual(notification, kAXFocusedWindowChangedNotification as CFString) { watcher.onFocusedWindowChange?() } // Switching windows inside Codex fires no app-activation notification; without this the bars would wait for the tracker's next one-second scan.
             if !watcher.suspended { watcher.onFocusChange?() }
             watcher.refreshSoon()
         }, &created) == .success, let created else { return }
@@ -125,14 +128,18 @@ final class CurrentModelWatcher {
             guard let self else { return }
             if AX.hasQueuedAction { DispatchQueue.main.async { self.inFlight = false }; return } // A queued action runs next; this poll's pre-walk reads held a quick reasoning flick ~130 ms until its release cancelled it (2026-10-29 19:07:40). The timer polls again shortly.
             let selection: CurrentSelection?
+            var windowBounds: CGRect?
             if let reader = self.customReader {
-                selection = reader(pid, models, force)
+                let read = reader(pid, models, force)
+                selection = read.selection
+                windowBounds = read.windowBounds
             } else {
                 if self.enabledWebAXForPID != pid {
                     AX.enableWebAccessibility(pid: pid)
                     self.enabledWebAXForPID = pid
                 }
                 if let window = AX.focusedWindow(pid: pid) {
+                    windowBounds = CodexWindowTracker.axFrame(window) // Read beside the selection, so a reading still reaches the right bar if focus moves before it is delivered.
                     let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: force,
                                                         yieldsToActions: true) // Toolbar and Agentic Mouse actions must not wait behind this background walk.
                     let read = CurrentModelMatcher.selection(
@@ -153,11 +160,11 @@ final class CurrentModelWatcher {
                     // Allow a short gap without flashing the slider back to zero.
                     if let selection, selection.modelID != nil {
                         self.missingSince = nil
-                        self.report(selection)
+                        self.report(selection, windowBounds: windowBounds)
                     } else {
                         if self.missingSince == nil { self.missingSince = Date() }
                         if Date().timeIntervalSince(self.missingSince!) >= 0.75 {
-                            self.report(CurrentSelection(modelID: nil, effort: nil))
+                            self.report(CurrentSelection(modelID: nil, effort: nil), windowBounds: windowBounds)
                         }
                     }
                 }
@@ -175,9 +182,10 @@ final class CurrentModelWatcher {
         return speed
     }
 
-    private func report(_ selection: CurrentSelection) {
-        guard lastReported != selection else { return }
+    private func report(_ selection: CurrentSelection, windowBounds: CGRect?) {
+        guard lastReported != selection || lastReportedWindowBounds != windowBounds else { return } // Another window can hold the same selection but has its own bar, so it must report too.
         lastReported = selection
-        onChange?(selection)
+        lastReportedWindowBounds = windowBounds
+        onChange?(selection, windowBounds)
     }
 }

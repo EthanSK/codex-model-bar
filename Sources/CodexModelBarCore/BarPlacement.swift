@@ -82,6 +82,23 @@ public enum BarPlacement {
         return best ?? normal // A screen filled by Codex has no outside slot; retain its existing top-edge last resort instead of hiding all controls.
     }
 
+    /// True when windows in front leave less than half of `window` visible, so its bar hides rather than floating over them.
+    public static func isMostlyCovered(_ window: CGRect, by windowsInFront: [CGRect]) -> Bool {
+        var visible = [window]
+        for front in windowsInFront {
+            visible = visible.flatMap { piece -> [CGRect] in
+                let cut = piece.intersection(front)
+                guard !cut.isNull, cut.width > 0, cut.height > 0 else { return [piece] }
+                return [CGRect(x: piece.minX, y: piece.minY, width: piece.width, height: cut.minY - piece.minY),
+                        CGRect(x: piece.minX, y: cut.maxY, width: piece.width, height: piece.maxY - cut.maxY),
+                        CGRect(x: piece.minX, y: cut.minY, width: cut.minX - piece.minX, height: cut.height),
+                        CGRect(x: cut.maxX, y: cut.minY, width: piece.maxX - cut.maxX, height: cut.height)]
+                    .filter { $0.width > 0 && $0.height > 0 } // Disjoint pieces, unlike `place`'s overlapping regions, so two front windows that overlap each other are not counted twice.
+            }
+        }
+        return visible.reduce(0) { $0 + $1.width * $1.height } < window.width * window.height / 2
+    }
+
     /// Extraction of the existing Codex strip calculation from `place`, including its no-space top-edge fallback; clear-region selection above is new.
     private static func normalFrame(window: CGRect, visibleFrame: CGRect, contentSize: CGSize) -> CGRect {
         let width = min(contentSize.width, visibleFrame.width)

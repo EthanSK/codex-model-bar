@@ -13,12 +13,12 @@ final class CurrentModelWatcherTests: XCTestCase {
             if reads == 1 {
                 started.fulfill()
                 _ = release.wait(timeout: .now() + 3)
-                return CurrentSelection(modelID: "old", effort: "low")
+                return (CurrentSelection(modelID: "old", effort: "low"), nil)
             }
             XCTAssertTrue(force)
-            return CurrentSelection(modelID: "new", effort: "xhigh")
+            return (CurrentSelection(modelID: "new", effort: "xhigh"), nil)
         }, isTrusted: { true }, observesFocus: false)
-        watcher.onChange = { selection in
+        watcher.onChange = { selection, _ in
             XCTAssertEqual(selection, CurrentSelection(modelID: "new", effort: "xhigh"))
             delivered.fulfill()
         }
@@ -42,11 +42,11 @@ final class CurrentModelWatcherTests: XCTestCase {
             if reads == 1 {
                 started.fulfill()
                 _ = release.wait(timeout: .now() + 3)
-                return CurrentSelection(modelID: "sol", effort: "low")
+                return (CurrentSelection(modelID: "sol", effort: "low"), nil)
             }
-            return CurrentSelection(modelID: "sol", effort: "max")
+            return (CurrentSelection(modelID: "sol", effort: "max"), nil)
         }, isTrusted: { true }, observesFocus: false)
-        watcher.onChange = { selection in
+        watcher.onChange = { selection, _ in
             XCTAssertEqual(selection.effort, "max")
             delivered.fulfill()
         }
@@ -72,9 +72,9 @@ final class CurrentModelWatcherTests: XCTestCase {
         let models = [CodexModel(id: "sol", displayName: "Sol")]
         let watcher = CurrentModelWatcher(readSelection: { _, _, _ in
             defer { index += 1 }
-            return values[min(index, values.count - 1)]
+            return (values[min(index, values.count - 1)], nil)
         }, isTrusted: { true }, observesFocus: false)
-        watcher.onChange = { selection in
+        watcher.onChange = { selection, _ in
             reported.append(selection); delivered.fulfill()
             if reported.count < values.count { watcher.refreshSoon() }
             else { watcher.update(pid: nil, models: models) }
@@ -84,4 +84,26 @@ final class CurrentModelWatcherTests: XCTestCase {
         XCTAssertEqual(reported, values)
     }
 
+    func testTheSameSelectionInAnotherWindowStillReportsSoThatWindowsBarUpdates() {
+        let windows = [CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 900, y: 0, width: 800, height: 600)]
+        let selection = CurrentSelection(modelID: "sol", effort: "high")
+        var index = 0
+        var reported: [CGRect?] = []
+        let delivered = expectation(description: "A reading from each window")
+        delivered.expectedFulfillmentCount = 2
+        let models = [CodexModel(id: "sol", displayName: "Sol")]
+        let watcher = CurrentModelWatcher(readSelection: { _, _, _ in
+            defer { index += 1 }
+            return (selection, windows[min(index, windows.count - 1)])
+        }, isTrusted: { true }, observesFocus: false)
+        watcher.onChange = { reading, windowBounds in
+            XCTAssertEqual(reading, selection)
+            reported.append(windowBounds); delivered.fulfill()
+            if reported.count < windows.count { watcher.refreshSoon() }
+            else { watcher.update(pid: nil, models: models) }
+        }
+        watcher.update(pid: 101, models: models)
+        wait(for: [delivered], timeout: 2)
+        XCTAssertEqual(reported, windows)
+    }
 }
