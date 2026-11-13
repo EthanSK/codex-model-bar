@@ -24,6 +24,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     private let reasoningSwitcher = ReasoningSwitcher()
     private let speedSwitcher = SpeedSwitcher()
     private var updater: AppUpdater?
+    /// The button beside Codex's floating Voice pill that reveals the live Voice chat. Independent of the bars: the pill floats over every app, so this follows it, not Codex's windows.
+    private lazy var voiceChatJump = VoiceChatJump(codexApp: { [weak self] in self?.tracker.codexApp })
 
     /// Every model Codex offers (before the user's show/hide choices).
     private var allModels: [CodexModel] = []
@@ -80,6 +82,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         watcher.onFocusedWindowChange = { [weak self] in self?.tracker.fullScan() }
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start() // Click-to-focus was removed after unreliable live targeting; do not restore a guessed pane resolver (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+        voiceChatJump.start()
 
         registerLoginItemOnFirstLaunch()
         updateTrustStatus(prompt: true)
