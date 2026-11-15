@@ -55,14 +55,14 @@ public enum BarPlacement {
                 }
             }.map(\.element)
         }
-        let preferred = CGRect(x: agentFlowHUD.map { $0.maxX + 4 } ?? normal.minX,
-                               y: window.minY - normal.height, width: normal.width, height: normal.height)
         var best: CGRect?
         var bestBottomDistance = CGFloat.infinity
         var bestDistance = CGFloat.infinity
         for region in regions {
             let measured = contentSizeForWidth?(region.width) ?? normal.size
             guard measured.width <= region.width, measured.height <= region.height else { continue }
+            let preferred = CGRect(x: agentFlowHUD.map { $0.midX > window.midX ? $0.minX - 4 - measured.width : $0.maxX + 4 } ?? normal.minX, // Prefer the side toward Codex's centre: Flow on the right puts the bar on its left. Use the measured width so wrapped controls stay beside Flow (Ethan, 2026-11-14, task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
+                                   y: window.minY - normal.height, width: measured.width, height: normal.height)
             let candidate = CGRect(x: min(max(preferred.minX, region.minX), region.maxX - measured.width),
                                    y: min(max(window.minY - measured.height, region.minY), region.maxY - measured.height), // Align the wrapped bar's top to Codex's bottom, not the unwrapped row's centre.
                                    width: measured.width, height: measured.height)
@@ -73,7 +73,7 @@ public enum BarPlacement {
                 bottomDistance < bestBottomDistance || (bottomDistance == bestBottomDistance &&
                     (candidate.height < $0.height || (candidate.height == $0.height && distance < bestDistance)))
             } ?? true
-            if improves { // Keep controls close and below Codex where possible; a nearby wrapped bar beats a distant top row. Prefer fewer rows among equally close slots, then Flow's right side (Ethan, task 01a0d315-7d5e-7be0-bc08-80626ca0729b, 2026-11-02).
+            if improves { // Keep controls close and below Codex where possible; a nearby wrapped bar beats a distant top row. Prefer fewer rows among equally close slots, then the side of Flow toward Codex's centre (Ethan, task 01a0d315-7d5e-7be0-bc08-80626ca0729b, 2026-11-02; side preference updated 2026-11-14).
                 best = candidate
                 bestBottomDistance = bottomDistance
                 bestDistance = distance

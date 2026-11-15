@@ -351,6 +351,36 @@ final class BarPlacementTests: XCTestCase {
         XCTAssertTrue(screen.contains(result))
     }
 
+    func testFlowSidePreferencePointsTowardCodexCentre() {
+        let screen = CGRect(x: 0, y: 0, width: 2600, height: 1500)
+        let window = CGRect(x: 400, y: 220, width: 1600, height: 800)
+        for offset in [CGFloat.zero, -3000] {
+            for flowX in [CGFloat(650), 1150] {
+                let flow = CGRect(x: flowX + offset, y: 100, width: 600, height: 180)
+                let shiftedWindow = window.offsetBy(dx: offset, dy: 0)
+                let result = BarPlacement.place(window: shiftedWindow, visibleFrame: screen.offsetBy(dx: offset, dy: 0),
+                                                contentSize: CGSize(width: 300, height: 30), agentFlowHUD: flow)
+                XCTAssertEqual(result.maxY, shiftedWindow.minY)
+                XCTAssertEqual(result.minX, flowX > 1000 ? flow.minX - 304 : flow.maxX + 4)
+                XCTAssertFalse(result.intersects(shiftedWindow))
+                XCTAssertFalse(result.intersects(flow))
+            }
+        }
+    }
+
+    func testFlowOnTheRightAnchorsTheMeasuredWrappedWidthToItsLeft() {
+        let screen = CGRect(x: 0, y: 0, width: 1800, height: 1000)
+        let window = CGRect(x: 100, y: 150, width: 1600, height: 750)
+        let flow = CGRect(x: 600, y: 0, width: 800, height: 200)
+        let result = BarPlacement.place(window: window, visibleFrame: screen, contentSize: CGSize(width: 700, height: 30),
+                                        agentFlowHUD: flow, contentSizeForWidth: { width in
+            width >= 700 ? CGSize(width: 700, height: 30) : CGSize(width: 230, height: 120)
+        })
+        XCTAssertEqual(result, CGRect(x: flow.minX - 234, y: 30, width: 230, height: 120))
+        XCTAssertFalse(result.intersects(window))
+        XCTAssertFalse(result.intersects(flow))
+    }
+
     func testNearbyWrappedControlsBeatADistantHorizontalRowAboveCodex() {
         let flow = CGRect(x: 200, y: 200, width: 1500, height: 700)
         let natural = CGSize(width: 700, height: 30)
