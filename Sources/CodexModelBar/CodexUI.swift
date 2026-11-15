@@ -226,6 +226,8 @@ enum CodexUI {
         var recent: [AXUIElement] = []
         /// "Matching models": catalogue entries shown only while a search is typed.
         var matching: [AXUIElement] = []
+        /// Current Codex searches in a popup text field; older menus use the composer.
+        var searchInput: AXUIElement?
     }
 
     static let recentHeader = "Recent models"
@@ -267,21 +269,44 @@ enum CodexUI {
     }
 
     /// The typing menu may be a portal anywhere in this composer's web area.
-    /// Require focus on this input before using the window-wide menu lookup.
+    /// Focus must stay on this composer or the search field inside its model menu.
     static func modelMenu(near composer: AXUIElement) -> ModelMenu? {
         var pid: pid_t = 0
         guard AXUIElementGetPid(composer, &pid) == .success,
-              composerHasFocus(composer, pid: pid), let window = AX.focusedWindow(pid: pid) else { return nil }
+              let window = AX.focusedWindow(pid: pid) else { return nil }
+        var lastNode: AXUIElement?
+        var lastRole = ""
+        func role(_ node: AXUIElement) -> String {
+            if lastNode.map({ CFEqual($0, node) }) != true { lastNode = node; lastRole = AX.role(node) }
+            return lastRole // The menu predicates share one role IPC per node, like composer discovery.
+        }
         let locator = ModelMenuLocator<AXUIElement>(children: AX.children,
-            isWebArea: { AX.role($0) == "AXWebArea" },
-            isButton: { AX.role($0) == kAXButtonRole as String },
+            isWebArea: { role($0) == "AXWebArea" },
+            isButton: { role($0) == kAXButtonRole as String },
             header: {
-                guard AX.role($0) == kAXStaticTextRole as String else { return nil }
+                guard role($0) == kAXStaticTextRole as String else { return nil }
                 let text = AX.string($0, kAXValueAttribute)
                 return [recentHeader, matchingHeader].contains(text) ? text : nil
-            }, equals: { CFEqual($0, $1) })
-        guard let menu = locator.locate(in: window, composer: composer) else { return nil }
-        return ModelMenu(recent: menu.recent, matching: menu.matching)
+            }, equals: { CFEqual($0, $1) },
+            isListBox: { role($0) == kAXListRole as String },
+            isOption: {
+                role($0) == kAXMenuItemRole as String
+                    || (role($0) == kAXStaticTextRole as String
+                        && (AX.attribute($0, kAXSelectedAttribute) as Bool?) != nil)
+            }, // Chromium exposes web ARIA options as menu items or selectable static text, not AXButtons.
+            isSearchInput: {
+                [kAXTextFieldRole as String, kAXComboBoxRole as String].contains(role($0))
+                    && [AX.title($0), AX.string($0, kAXDescriptionAttribute)].contains("Model")
+            })
+        guard let menu = locator.locate(in: window, composer: composer),
+              composerHasFocus(menu.searchInput ?? composer, pid: pid) else { return nil }
+        return ModelMenu(recent: menu.recent, matching: menu.matching, searchInput: menu.searchInput)
+    }
+
+    /// ARIA options can expose their visible name as AXValue instead of AXTitle.
+    static func modelMenuEntryTitle(_ entry: AXUIElement) -> String {
+        let title = AX.title(entry)
+        return title.isEmpty ? AX.string(entry, kAXValueAttribute) : title
     }
 
     /// The menu entry for `target`. Entry titles are Codex's UI-formatted name plus

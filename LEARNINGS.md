@@ -1,5 +1,13 @@
 # Learnings
 
+## 1.2.79: recent-model search owns its own input
+
+Codex 26.1111.21308's bundled renderer opens the recent-model submenu with a labelled `Model` search field, focuses it on the next animation frame, and places selectable ARIA options under an items wrapper in each listbox section. The title also contains a shortcut button. The installed 1.2.78 log on 2026-11-15 showed repeated failures before typing; the old parser's source-derived reproduction selected that shortcut button instead of a result. This establishes a source compatibility defect, not a completed live click test: Computer Use refused the Codex bundle, and no alternate AX/keyboard driver was used to bypass that restriction.
+
+The locator now returns the popup's unique search field together with its result sections. Match options inside the same listbox and web area, exclude the header's shortcut button, and accept focus only on that field. Legacy inline-search menus still use their original composer. Keep the typed model-ID route, existing pacing, target-only readiness check, one Return, and immediate completion for ordinary buttons. The popup query must start empty, and typing stops if that exact field loses focus. Abandoning a popup closes it without Backspacing into the chat draft; the combined Astra/Ultrafast action still checks the original draft and model before its dependent speed change.
+
+Tests use a labelled source-derived tree, not a purported live AX capture. They preserve the older adjacent/portal menu cases and reject duplicate menus, duplicate search fields and embedded-browser results. Native Chromium web options can map to menu items or selectable static text; visible names can be AXTitle or AXValue. The installed user's first real switch remains the acceptance gate when live agent control is unavailable.
+
 ## 1.2.77: a button beside Codex's Voice pill opens the live Voice chat
 
 Ethan asked for a control beside the floating panel that appears when a Codex Voice call starts, which reveals and selects that exact live chat in the sidebar (Claude session local_f5bfc491, 2026-11-11). The panel, marker and identity facts were read with Accessibility during one live call in one Codex window on Codex 26.1103.60933 (build 25894); the landmark and pruning timings were taken just after that call ended. Nothing was clicked in Codex.
