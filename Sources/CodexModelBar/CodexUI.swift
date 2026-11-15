@@ -268,6 +268,9 @@ enum CodexUI {
         return matches.isEmpty ? nil : matches
     }
 
+    /// Why the last `modelMenu` call found nothing, for the "did not open" log line.
+    static var lastMenuMiss = "not-read"
+
     /// The typing menu may be a portal anywhere in this composer's web area.
     /// Focus must stay on this composer or the search field inside its model menu.
     static func modelMenu(near composer: AXUIElement) -> ModelMenu? {
@@ -295,15 +298,30 @@ enum CodexUI {
             isOption: {
                 role($0) == kAXMenuItemRole as String
                     || (role($0) == kAXStaticTextRole as String
-                        && (AX.attribute($0, kAXSelectedAttribute) as Bool?) != nil)
+                        && (AX.attribute($0, kAXSelectedAttribute) as Bool?) != nil
+                        && AX.string($0, "AXDOMIdentifier").contains("-option-")) // Live Codex 26.1111 (2026-11-15) gives every static text a selected flag, including each option's name parts and the header's ⌃⌘M; only real options have ids like "_r_1eqg_-option-0".
             }, // Chromium exposes web ARIA options as menu items or selectable static text, not AXButtons.
             isSearchInput: {
                 [kAXTextFieldRole as String, kAXComboBoxRole as String].contains(role($0))
                     && [AX.title($0), AX.string($0, kAXDescriptionAttribute)].contains("Model")
             })
-        guard let menu = locator.locate(in: window, composer: composer),
-              composerHasFocus(menu.searchInput ?? composer, pid: pid) else { return nil }
+        guard let menu = locator.locate(in: window, composer: composer) else { lastMenuMiss = "locator"; return nil }
+        guard searchHasFocus(menu.searchInput ?? composer, pid: pid) else {
+            let focused: AXUIElement? = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+            lastMenuMiss = "focus search=\(identity(menu.searchInput ?? composer)) focused=\(identity(focused)) parent=\(identity(focused.flatMap(AX.parent))) owner=\(AX.keyboardOwnerPID().map(String.init) ?? "none") frontmost=\(NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)"
+            return nil
+        }
         return ModelMenu(recent: menu.recent, matching: menu.matching, searchInput: menu.searchInput)
+    }
+
+    /// Focus check for the model search: the composer, the popup's search field, or,
+    /// when Codex hides that field, the Model listbox whose option holds keyboard focus.
+    static func searchHasFocus(_ input: AXUIElement, pid: pid_t) -> Bool {
+        guard AX.role(input) == kAXListRole as String else { return composerHasFocus(input, pid: pid) }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid, AX.keyboardOwnerPID() == pid,
+              let focused: AXUIElement = AX.attribute(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute)
+        else { return false }
+        return CFEqual(focused, input) || AX.parent(focused).map { CFEqual($0, input) } == true // Live Codex 26.1111 (2026-11-15): the highlighted option is the listbox's direct child.
     }
 
     /// ARIA options can expose their visible name as AXValue instead of AXTitle.

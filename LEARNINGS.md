@@ -1,5 +1,16 @@
 # Learnings
 
+## 1.2.81: live Codex hides the model popup's search field
+
+Ethan reported on 2026-11-15 that 1.2.80 still opened the recent-model suggestions and never typed the model or pressed Return; the log showed `Codex's /model menu did not open` after Control-Command-M. With his go-ahead, the live tree was read with Accessibility in Codex 26.1111 (no clicks, Escape to close, empty draft checked before and after). It differs from the 1.2.79/1.2.80 source fixtures in two ways:
+
+- **No search field is exposed.** The popup is an `AXList` titled `Model`. Keyboard focus lands on the first option, an `AXStaticText`. Typing still filters it: `gpt-6.1-sol`, `claude-fable-5-2` and `gpt-6-astra` each left only that model under Recent models and Matching models. The draft stayed empty, and the listbox stayed the same element while typing. 1.2.80 required exactly one search field, so it rejected the open menu.
+- **Every static text has a selected flag**, including each option's name parts ("Extra High", "Standard", single letters) and the header's `⌃⌘M`. Real options have DOM ids like `_r_1eqg_-option-0`.
+
+Fix: with no exposed field, the Model listbox stands in for it. Its focus check accepts keyboard focus on the listbox or its direct child option, and the bar types only into a menu it just opened, because a hidden query can't be read to prove it empty. Static-text options must have an `-option-` DOM id. Abandoning still closes the popup with Escape and never Backspaces into the draft. Timing, the typed model-ID route and the single Return are unchanged.
+
+Live result (2026-11-15 15:57 UTC): pressing the installed 1.2.81 bar's Fable 5.2 button typed the search and pressed Return (`result=requested`, 2.3 s), and the chat's model changed. The chat was put back afterwards. A later attempt failed with `miss=focus … owner=<Agent Flow>`: while Agent Flow's typing box holds the keyboard, the bar still refuses to type, as it did on the composer route. A "did not open" failure now logs `phase=menu-not-found miss=…`, naming either the locator or the focus check (search target, focused element, its parent, keyboard owner, frontmost).
+
 ## 1.2.80: Accessibility removes the model menu's DOM wrappers
 
 Ethan's 2026-11-15 live report and 1.2.79 logs still showed failure before typing or Return, despite the popup being visible. Codex itself remained 26.1111.21308. An isolated HTML fixture based on its renderer was inspected through the permitted IAB browser surface: the Recent title retained one group, but the options and Matching title were direct listbox children. The 1.2.79 parser assumed the DOM's section wrapper would remain, so it found no results. Do not treat DOM nesting or a hand-built tree as a captured native Accessibility tree.

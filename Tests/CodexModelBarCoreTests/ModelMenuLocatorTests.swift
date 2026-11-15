@@ -52,34 +52,28 @@ final class ModelMenuLocatorTests: XCTestCase {
         XCTAssertEqual(found?.recent.count, 0)
         XCTAssertTrue(found?.matching.first === matching)
     }
-    func testPopupWithoutItsOwnSearchInputDoesNotTypeIntoComposer() {
-        let view = Node("web", "", [input, Node("listbox", "", [section("Recent models", [Node("option")])])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [view]), composer: input))
+    func testPopupWithoutItsOwnSearchInputSearchesThroughTheListBoxNotTheComposer() {
+        let list = Node("listbox", "", [section("Recent models", [Node("option")])])
+        let found = locator.locate(in: Node("window", "", [Node("web", "", [input, list])]), composer: input)
+        XCTAssertTrue(found?.searchInput === list)
     }
-    func testPopupWithTwoSearchInputsIsAmbiguous() {
-        let menu = popup(search: Node("group", "", [Node("search"), Node("search")]), sections: [section("Recent models", [Node("option")])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [Node("web", "", [input, menu])]), composer: input))
-    }
-    func testEmbeddedBrowserCannotSupplyPopupSearchOrResults() {
-        let embedded = Node("web", "", [popup(search: Node("search"), sections: [section("Recent models", [Node("option")])])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [Node("web", "", [input, embedded])]), composer: input))
-        let split = Node("group", "", [embedded, Node("listbox", "", [section("Recent models", [Node("option")])])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [Node("web", "", [input, split])]), composer: input))
-    }
-    func testTwoPopupMenusAndDuplicateHeadersAreAmbiguous() {
-        let menu = popup(search: Node("search"), sections: [section("Recent models", [Node("option")])])
-        let other = popup(search: Node("search"), sections: [section("Recent models", [Node("option")])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [Node("web", "", [input, menu, other])]), composer: input))
-        let duplicates = popup(search: Node("search"), sections: [section("Recent models", [Node("option")]), section("Recent models", [Node("option")])])
-        XCTAssertNil(locator.locate(in: Node("window", "", [Node("web", "", [input, duplicates])]), composer: input))
-    }
-    func testOptionInspectionSkipsTheTranscriptOutsideAListBox() {
-        var inspected = 0
-        let fast = ModelMenuLocator<Node>(children: { $0.children }, isWebArea: { $0.role == "web" },
-            isButton: { $0.role == "button" }, header: { _ in nil }, equals: { $0 === $1 },
-            isListBox: { $0.role == "listbox" }, isOption: { _ in inspected += 1; return false })
-        XCTAssertNil(fast.locate(in: Node("window", "", [Node("web", "", [input, Node("text", "long transcript")])]), composer: input))
-        XCTAssertEqual(inspected, 0, "Option attribute reads belong to the popup, not every transcript sentence")
+    // Captured from live Codex 26.1111 with Accessibility on 2026-11-15: no search
+    // field is exposed, focus sits on an option, and the options are the listbox's
+    // direct children. CodexUI's option predicate (DOM id "-option-N") already
+    // excludes each option's name parts and the header's ⌃⌘M text.
+    func testLiveHiddenSearchMenuFindsBothSections() {
+        let recent = Node("option", "1 GPT-6.1 Sol Extra High Standard", [Node("text", "Extra High")])
+        let matching = Node("option", "GPT-6.1 Sol Latest workhorse model")
+        let list = Node("listbox", "", [
+            Node("group", "", [Node("text", "Recent models"), Node("text", "⌃⌘M")]), recent,
+            Node("group", "", [Node("text", "Matching models")]), matching])
+        let view = Node("web", "", [input, Node("group", "", [Node("group", "", [list])])])
+        let found = locator.locate(in: Node("window", "", [view]), composer: input)
+        XCTAssertTrue(found?.searchInput === list)
+        XCTAssertEqual(found?.recent.count, 1)
+        XCTAssertTrue(found?.recent.first === recent)
+        XCTAssertEqual(found?.matching.count, 1)
+        XCTAssertTrue(found?.matching.first === matching)
     }
     // Observed in the isolated IAB fixture on 2026-11-15: the title retained one
     // group, but options and Matching models became direct listbox children.

@@ -87,8 +87,11 @@ public struct ModelMenuLocator<Node> {
             let inputs = searchInputs.filter { _, ancestors in
                 ancestors.last(where: isWebArea).map { equals($0, webArea) } == true
             }
-            guard inputs.count == 1 else { return nil }
-            searchInput = inputs[0].0 // The popup wrapper may also be ignored. CodexUI requires this exact field's focus and the labelled Model listbox.
+            switch inputs.count {
+            case 0: searchInput = first.1 // Live Codex 26.1111 (2026-11-15) hides the popup's search field from Accessibility; keyboard focus sits on an option and typing still filters, so the listbox stands in for the field.
+            case 1: searchInput = inputs[0].0 // The popup wrapper may also be ignored. CodexUI requires this exact field's focus and the labelled Model listbox.
+            default: return nil
+            }
         }
         return Menu(recent: sections.first(where: { $0.0 == "Recent models" })?.2 ?? [],
                     matching: sections.first(where: { $0.0 == "Matching models" })?.2 ?? [],

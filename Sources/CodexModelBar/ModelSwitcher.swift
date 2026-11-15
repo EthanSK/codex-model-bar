@@ -142,6 +142,7 @@ final class ModelSwitcher {
 
         // Step 2: open the /model menu, unless the user already has it open.
         var menu = CodexUI.modelMenu(near: composer)
+        let openedMenu = menu == nil
         if menu == nil {
             Log.info("model-switch phase=open-menu shortcut=control-command-m")
             let focusingAt = ProcessInfo.processInfo.systemUptime
@@ -159,6 +160,7 @@ final class ModelSwitcher {
         }
         guard let menu else {
             // Only close this composer's menu while it still owns keyboard focus.
+            Log.info("model-switch attempt=\(attempt) phase=menu-not-found miss=\(CodexUI.lastMenuMiss)") // Read before closeMenuIfOpen overwrites it.
             closeMenuIfOpen(composer: composer, pid: pid)
             return .failed("Codex's /model menu did not open")
         }
@@ -183,7 +185,9 @@ final class ModelSwitcher {
         guard let before = CodexUI.composerText(composer) else {
             return .failed("message box became unavailable before searching")
         }
-        if menu.searchInput != nil {
+        if menu.searchInput != nil, AX.role(searchInput) == kAXListRole as String {
+            guard openedMenu else { return .cancelledForTyping } // A hidden popup query can't be read; only a menu the bar just opened is known to start empty.
+        } else if menu.searchInput != nil {
             guard let queryText: String = AX.attribute(searchInput, kAXValueAttribute), queryText.isEmpty,
                   AX.string(searchInput, kAXSelectedTextAttribute).isEmpty else { return .cancelledForTyping }
         } // Do not append to an existing popup query or alter the user's chat draft.
@@ -196,7 +200,7 @@ final class ModelSwitcher {
         for character in query {
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                   !Keyboard.userInteracted(since: searchStartedAt),
-                  (menu.searchInput == nil || AX.isFocused(searchInput)) else {
+                  (menu.searchInput == nil || AX.isFocused(searchInput) || CodexUI.searchHasFocus(searchInput, pid: pid)) else {
                 return abandonSearch(typed, before: before, composer: composer, pid: pid, searchInput: searchInput,
                                      since: searchStartedAt, result: .failed("message box lost focus while searching"),
                                      window: window, models: allModels, allowPanelRecovery: true,
@@ -459,7 +463,7 @@ final class ModelSwitcher {
     }
 
     private static func isFocused(_ element: AXUIElement, pid: pid_t) -> Bool {
-        CodexUI.composerHasFocus(element, pid: pid)
+        CodexUI.searchHasFocus(element, pid: pid)
     }
 
     // MARK: - Polling helpers
