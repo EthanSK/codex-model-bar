@@ -116,7 +116,7 @@ final class WindowTrackerTests: XCTestCase {
             }))
         }
         XCTAssertEqual(normal, CGRect(x: 622, y: 103, width: 786, height: 30))
-        XCTAssertGreaterThanOrEqual(placed[0].minX, 1513, "A real overlapping HUD still moves the controls to its right")
+        XCTAssertLessThanOrEqual(placed[0].maxX, 542, "An overlapping HUD right of Codex's centre moves the controls to its left")
         XCTAssertEqual(placed[1], normal, "A clear normal strip must not detour left because of Flow's extra four-point margin")
         XCTAssertEqual(placed[2], normal, "Removing the hidden window must keep the same normal placement")
     }
