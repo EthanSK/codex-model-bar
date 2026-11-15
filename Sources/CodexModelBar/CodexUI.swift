@@ -285,10 +285,13 @@ enum CodexUI {
             isButton: { role($0) == kAXButtonRole as String },
             header: {
                 guard role($0) == kAXStaticTextRole as String else { return nil }
-                let text = AX.string($0, kAXValueAttribute)
+                let text = AX.string($0, kAXValueAttribute).trimmingCharacters(in: .whitespacesAndNewlines)
                 return [recentHeader, matchingHeader].contains(text) ? text : nil
             }, equals: { CFEqual($0, $1) },
-            isListBox: { role($0) == kAXListRole as String },
+            isListBox: {
+                role($0) == kAXListRole as String
+                    && [AX.title($0), AX.string($0, kAXDescriptionAttribute)].contains("Model")
+            },
             isOption: {
                 role($0) == kAXMenuItemRole as String
                     || (role($0) == kAXStaticTextRole as String

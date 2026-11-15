@@ -35,36 +35,38 @@ public struct ModelMenuLocator<Node> {
     public func locate(in window: Node, composer: Node) -> Menu? {
         var stack: [(Node, [Node], Bool)] = [(window, [], false)]
         var composerPath: [Node]?
-        var headers: [(String, [Node])] = []
-        var options: [(Node, [Node])] = []
+        var headers: [(String, [Node], Int)] = []
+        var options: [(Node, [Node], Int)] = []
         var searchInputs: [(Node, [Node])] = []
         var count = 0
         while let (node, path, parentListBox) = stack.popLast() {
             count += 1
             guard count <= 30_000 else { return nil }
             if equals(node, composer) { composerPath = path }
-            if let name = header(node) { headers.append((name, path)) }
+            if let name = header(node) { headers.append((name, path, count)) }
             let inListBox = isWebArea(node) ? false : (parentListBox || isListBox(node))
-            if inListBox && isOption(node) { options.append((node, path)) }
+            if inListBox && isOption(node) { options.append((node, path, count)) }
             if isSearchInput(node) { searchInputs.append((node, path)) }
             stack.append(contentsOf: children(node).reversed().map { ($0, path + [node], inListBox) })
         }
         guard let webArea = composerPath?.last(where: isWebArea) else { return nil }
         var sections: [(String, Node, [Node])] = []
-        for (name, path) in headers {
+        for (name, path, order) in headers {
             // An embedded browser may contain the same words; it cannot provide
             // the menu for an input in Codex's outer web area.
             guard let owner = path.last(where: isWebArea), equals(owner, webArea) else { continue }
-            // Codex 26.1111 gives each section an items wrapper and ARIA options,
-            // rather than direct buttons. Use its nearest listbox, not a header's
-            // shortcut button or a matching phrase elsewhere in the transcript.
-            if let index = path.lastIndex(where: isListBox), index + 1 < path.count {
-                let section = path[index + 1]
-                let entries = options.filter { _, ancestors in
-                    ancestors.contains { equals($0, section) }
-                        && ancestors.last(where: isListBox).map { equals($0, path[index]) } == true
+            // Accessibility removes anonymous section/items wrappers. Use the
+            // listbox's reading order, as the real browser fixture does; do not
+            // require DOM parentage or mistake the title's shortcut for an option.
+            if let listBox = path.last(where: isListBox) {
+                let end = headers.first { _, ancestors, nextOrder in
+                    nextOrder > order && ancestors.last(where: isListBox).map { equals($0, listBox) } == true
+                }?.2 ?? Int.max // The last section runs to the end of its own listbox.
+                let entries = options.filter { _, ancestors, optionOrder in
+                    optionOrder > order && optionOrder < end
+                        && ancestors.last(where: isListBox).map { equals($0, listBox) } == true
                 }.map(\.0)
-                if !entries.isEmpty { sections.append((name, path[index], entries)) }
+                if !entries.isEmpty { sections.append((name, listBox, entries)) }
                 continue
             }
             for index in path.indices.reversed().prefix(3) {
@@ -82,18 +84,11 @@ public struct ModelMenuLocator<Node> {
               sections.filter({ $0.0 == "Matching models" }).count <= 1 else { return nil }
         var searchInput: Node?
         if isListBox(first.1) {
-            guard let path = headers.first(where: { _, path in path.contains { equals($0, first.1) } })?.1,
-                  let listIndex = path.firstIndex(where: { equals($0, first.1) }) else { return nil }
-            for ancestor in path[..<listIndex].reversed() {
-                if isWebArea(ancestor) { break }
-                let inputs = searchInputs.filter { _, ancestors in
-                    ancestors.contains { equals($0, ancestor) }
-                        && ancestors.last(where: isWebArea).map { equals($0, webArea) } == true
-                }
-                guard inputs.count <= 1 else { return nil }
-                if let input = inputs.first { searchInput = input.0; break }
+            let inputs = searchInputs.filter { _, ancestors in
+                ancestors.last(where: isWebArea).map { equals($0, webArea) } == true
             }
-            guard searchInput != nil else { return nil }
+            guard inputs.count == 1 else { return nil }
+            searchInput = inputs[0].0 // The popup wrapper may also be ignored. CodexUI requires this exact field's focus and the labelled Model listbox.
         }
         return Menu(recent: sections.first(where: { $0.0 == "Recent models" })?.2 ?? [],
                     matching: sections.first(where: { $0.0 == "Matching models" })?.2 ?? [],

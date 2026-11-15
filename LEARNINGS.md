@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.80: Accessibility removes the model menu's DOM wrappers
+
+Ethan's 2026-11-15 live report and 1.2.79 logs still showed failure before typing or Return, despite the popup being visible. Codex itself remained 26.1111.21308. An isolated HTML fixture based on its renderer was inspected through the permitted IAB browser surface: the Recent title retained one group, but the options and Matching title were direct listbox children. The 1.2.79 parser assumed the DOM's section wrapper would remain, so it found no results. Do not treat DOM nesting or a hand-built tree as a captured native Accessibility tree.
+
+Read model options in their labelled listbox's order, from one section header to the next, rather than requiring anonymous wrappers. The popup wrapper may also be ignored: bind the one Model search field in the same web area, then require its exact keyboard focus in CodexUI. Multiple fields, multiple menus and embedded-browser results remain rejected. The actual browser fixture is regression-tested alongside arbitrary wrapper depths and the original inline route. This fixes a reproduced parser defect without adding key delays, post-choice verification, Enter retries or changes to the draft/typing route. A real Codex model switch remains a separate user acceptance step because Computer Use refuses that app.
+
 ## 1.2.79: recent-model search owns its own input
 
 Codex 26.1111.21308's bundled renderer opens the recent-model submenu with a labelled `Model` search field, focuses it on the next animation frame, and places selectable ARIA options under an items wrapper in each listbox section. The title also contains a shortcut button. The installed 1.2.78 log on 2026-11-15 showed repeated failures before typing; the old parser's source-derived reproduction selected that shortcut button instead of a result. This establishes a source compatibility defect, not a completed live click test: Computer Use refused the Codex bundle, and no alternate AX/keyboard driver was used to bypass that restriction.

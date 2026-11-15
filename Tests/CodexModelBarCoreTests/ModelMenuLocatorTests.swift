@@ -81,6 +81,46 @@ final class ModelMenuLocatorTests: XCTestCase {
         XCTAssertNil(fast.locate(in: Node("window", "", [Node("web", "", [input, Node("text", "long transcript")])]), composer: input))
         XCTAssertEqual(inspected, 0, "Option attribute reads belong to the popup, not every transcript sentence")
     }
+    // Observed in the isolated IAB fixture on 2026-11-15: the title retained one
+    // group, but options and Matching models became direct listbox children.
+    func testBrowserFlattenedMenuReachesBothModelSections() {
+        let search = Node("search"), recent = Node("option", "Opus 5.5"), matching = Node("option", "Fable 5.2")
+        let list = Node("listbox", "", [
+            Node("group", "", [Node("text", "Recent models"), Node("button", "Control+Command+M")]),
+            recent, Node("text", "Matching models"), matching
+        ])
+        let view = Node("web", "", [input, Node("group", "", [search, list])])
+        let found = locator.locate(in: Node("window", "", [view]), composer: input)
+        XCTAssertTrue(found?.searchInput === search)
+        XCTAssertEqual(found?.recent.count, 1)
+        XCTAssertTrue(found?.recent.first === recent)
+        XCTAssertEqual(found?.matching.count, 1)
+        XCTAssertTrue(found?.matching.first === matching)
+    }
+    func testPopupWrapperCanAlsoBeIgnoredWithoutLosingItsFocusedSearch() {
+        let search = Node("search"), matching = Node("option", "Fable 5.2")
+        let list = Node("listbox", "", [Node("text", "Matching models"), matching])
+        let view = Node("web", "", [input, search, list])
+        let found = locator.locate(in: Node("window", "", [view]), composer: input)
+        XCTAssertTrue(found?.searchInput === search)
+        XCTAssertTrue(found?.matching.first === matching)
+    }
+    func testSectionsUseReadingOrderAcrossDifferentWrapperDepths() {
+        for depth in 0...6 {
+            let search = Node("search"), recent = Node("option", "Opus 5.5"), matching = Node("option", "Fable 5.2")
+            var recentNode = recent, matchingNode = matching
+            for _ in 0..<depth { recentNode = Node("group", "", [recentNode]); matchingNode = Node("group", "", [matchingNode]) }
+            let list = Node("listbox", "", [Node("text", "Recent models"), recentNode, Node("text", "Matching models"), matchingNode])
+            let found = locator.locate(in: Node("window", "", [Node("web", "", [input, search, list])]), composer: input)
+            XCTAssertTrue(found?.recent.first === recent)
+            XCTAssertTrue(found?.matching.first === matching)
+        }
+    }
+    func testAnotherModelSearchFieldInTheSameWebAreaIsAmbiguous() {
+        let list = Node("listbox", "", [Node("text", "Matching models"), Node("option", "Fable 5.2")])
+        let view = Node("web", "", [input, Node("search"), Node("group", "", [Node("search"), list])])
+        XCTAssertNil(locator.locate(in: Node("window", "", [view]), composer: input))
+    }
     func testOriginalAdjacentMenu() {
         let window = Node("window", "", [Node("web", "", [Node("group", "", [input, menu()])])])
         XCTAssertTrue(locator.locate(in: window, composer: input)?.recent.first === target)
