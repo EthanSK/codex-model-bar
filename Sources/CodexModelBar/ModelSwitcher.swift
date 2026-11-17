@@ -136,7 +136,7 @@ final class ModelSwitcher {
         } // Resolve the intended pane before activation; reuse speed/reasoning's focus write without moving the draft selection (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: allModels)
         if current.modelID == target.id {
-            if enableUltrafast { return selectUltrafast(original: located, window: window, pid: pid, models: allModels, selection: current, since: switchStartedAt) }
+            if enableUltrafast { return selectUltrafast(original: located, window: window, pid: pid, models: allModels, selection: current, requestedModelID: target.id, since: switchStartedAt) }
             return .alreadyCurrent(current)
         }
 
@@ -274,7 +274,7 @@ final class ModelSwitcher {
         if let confirmed, cleanup == .restored,
            !Keyboard.userInteracted(since: searchStartedAt) {
             return selectUltrafast(original: confirmed.located, window: window, pid: pid,
-                                  models: allModels, selection: confirmed.selection, since: switchStartedAt)
+                                  models: allModels, selection: confirmed.selection, requestedModelID: target.id, since: switchStartedAt)
         }
         return .failed("Astra/Ultrafast change could not be confirmed")
     }
@@ -283,8 +283,8 @@ final class ModelSwitcher {
     /// inspect again to confirm ON. Return is never sent without the exact live
     /// command entry, so an unavailable command cannot submit the user's draft.
     private static func selectUltrafast(original: CodexUI.Located, window: AXUIElement, pid: pid_t,
-                                       models: [CodexModel], selection: CurrentSelection, since started: TimeInterval) -> Result {
-        guard !Keyboard.userInteracted(since: started), selection.modelID == MouseShortcut.astraModelID,
+                                       models: [CodexModel], selection: CurrentSelection, requestedModelID: String, since started: TimeInterval) -> Result {
+        guard !Keyboard.userInteracted(since: started), selection.modelID == requestedModelID,
               let identity = original.identity, let composer = original.composer,
               focus(composer, pid: pid), CodexUI.modelMenu(near: composer) == nil,
               let before = CodexUI.composerText(composer),
@@ -331,7 +331,7 @@ final class ModelSwitcher {
         }
         if state == .enabled {
             guard cleanup() else { return .failed("Could not restore the draft after checking Ultrafast") }
-            Log.info("mouse-shortcut result=confirmed model=gpt-6-astra speed=ultrafast alreadyEnabled=true")
+            Log.info("mouse-shortcut result=confirmed model=\(requestedModelID) speed=ultrafast alreadyEnabled=true")
             return .alreadyCurrent(selection)
         }
         guard sameComposer(), CodexUI.ultrafastCommand(near: composer)?.1 == .disabled,
@@ -346,7 +346,7 @@ final class ModelSwitcher {
             return .failed("Astra selected; Ultrafast could not be confirmed")
         }
         guard cleanup() else { return .failed("Ultrafast enabled; draft restoration could not be confirmed") }
-        Log.info("mouse-shortcut result=confirmed model=gpt-6-astra speed=ultrafast alreadyEnabled=false")
+        Log.info("mouse-shortcut result=confirmed model=\(requestedModelID) speed=ultrafast alreadyEnabled=false")
         return .switched(selection)
     }
 

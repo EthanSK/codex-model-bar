@@ -317,8 +317,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             return
         case .astraUltrafast: break
         }
-        guard let model = allModels.first(where: { $0.id == MouseShortcut.astraModelID }) else {
-            actingBar(for: nil)?.showStatus("GPT-6 Astra is unavailable", color: .systemOrange)
+        guard let model = MouseShortcut.astraUltrafastModel(in: allModels) else {
+            actingBar(for: nil)?.showStatus("Astra Ultrafast is unavailable", color: .systemOrange)
             return
         }
         Log.info("mouse-shortcut request=astra-ultrafast")

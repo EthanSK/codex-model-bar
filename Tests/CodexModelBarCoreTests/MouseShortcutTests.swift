@@ -2,6 +2,19 @@ import XCTest
 @testable import CodexModelBarCore
 
 final class MouseShortcutTests: XCTestCase {
+    func testAstraShortcutFollowsNewestVisibleModelWithUltrafast() {
+        let models = [
+            CodexModel(id: "gpt-6-astra", displayName: "Astra", speedTiers: [.ultrafast]),
+            CodexModel(id: "gpt-6.2-astra", displayName: "Astra 6.2", speedTiers: [.ultrafast]),
+            CodexModel(id: "gpt-6.10-astra", displayName: "Astra 6.10", speedTiers: [.ultrafast]),
+            CodexModel(id: "gpt-7-astra", displayName: "Astra 7", speedTiers: [.fast]),
+            CodexModel(id: "gpt-8-astra", displayName: "Astra 8", hidden: true, speedTiers: [.ultrafast]),
+            CodexModel(id: "gpt-9-sol", displayName: "Sol 9", speedTiers: [.ultrafast])
+        ]
+        XCTAssertEqual(MouseShortcut.astraUltrafastModel(in: models)?.id, "gpt-6.10-astra")
+        XCTAssertNil(MouseShortcut.astraUltrafastModel(in: Array(models.suffix(3))))
+    }
+
     func testFixedShortcutRejectsExtraCommandsAndPayloads() throws {
         XCTAssertTrue(MouseShortcut.isAstraUltrafast(try XCTUnwrap(URL(string: "codex-model-bar://astra-ultrafast"))))
         for text in ["https://astra-ultrafast", "codex-model-bar://other", "codex-model-bar://astra-ultrafast/extra",

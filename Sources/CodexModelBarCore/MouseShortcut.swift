@@ -3,7 +3,13 @@ import Foundation
 /// Fixed local actions only; a URL cannot supply text or an arbitrary command.
 public enum MouseShortcut {
     public enum Action { case astraUltrafast, speedUp, speedDown, speedCancel, reasoningUp, reasoningDown, reasoningCancel }
-    public static let astraModelID = "gpt-6-astra"
+    // "Astra Ultrafast" follows the newest visible Astra that advertises this speed.
+    public static func astraUltrafastModel(in models: [CodexModel]) -> CodexModel? {
+        models.filter {
+            !$0.hidden && $0.speedTiers.contains(.ultrafast)
+                && $0.id.range(of: #"^gpt-\d+(?:\.\d+)?-astra$"#, options: .regularExpression) != nil
+        }.max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
+    }
     public static func isAstraUltrafast(_ url: URL) -> Bool {
         action(for: url) == .astraUltrafast
     }

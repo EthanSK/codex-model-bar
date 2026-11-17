@@ -1,5 +1,9 @@
 # Learnings
 
+## 2026-11-17 — Astra shortcut follows the catalogue
+
+Resolve the Astra Ultrafast gesture from the newest visible Astra with Ultrafast in its advertised speed tiers. Pass that exact ID through model confirmation and speed selection. Checking a separate fixed ID in the speed step would block a successful switch on the first release after an upgrade. The focused mouse shortcut suite covers numeric version order, hidden entries and newer models that cannot run at Ultrafast.
+
 ## 1.2.81: live Codex hides the model popup's search field
 
 Ethan reported on 2026-11-15 that 1.2.80 still opened the recent-model suggestions and never typed the model or pressed Return; the log showed `Codex's /model menu did not open` after Control-Command-M. With his go-ahead, the live tree was read with Accessibility in Codex 26.1111 (no clicks, Escape to close, empty draft checked before and after). It differs from the 1.2.79/1.2.80 source fixtures in two ways:
