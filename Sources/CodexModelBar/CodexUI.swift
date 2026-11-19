@@ -220,15 +220,7 @@ enum CodexUI {
 
     // MARK: - The `/model` menu
 
-    /// Entries of the open `/model` menu, by section.
-    struct ModelMenu {
-        /// "Recent models": saved model + effort + speed configurations (no typing needed).
-        var recent: [AXUIElement] = []
-        /// "Matching models": catalogue entries shown only while a search is typed.
-        var matching: [AXUIElement] = []
-        /// Current Codex searches in a popup text field; older menus use the composer.
-        var searchInput: AXUIElement?
-    }
+    typealias ModelMenu = ModelMenuLocator<AXUIElement>.Menu
 
     static let recentHeader = "Recent models"
     static let matchingHeader = "Matching models"
@@ -311,7 +303,7 @@ enum CodexUI {
             lastMenuMiss = "focus search=\(identity(menu.searchInput ?? composer)) focused=\(identity(focused)) parent=\(identity(focused.flatMap(AX.parent))) owner=\(AX.keyboardOwnerPID().map(String.init) ?? "none") frontmost=\(NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)"
             return nil
         }
-        return ModelMenu(recent: menu.recent, matching: menu.matching, searchInput: menu.searchInput)
+        return menu
     }
 
     /// Focus check for the model search: the composer, the popup's search field, or,

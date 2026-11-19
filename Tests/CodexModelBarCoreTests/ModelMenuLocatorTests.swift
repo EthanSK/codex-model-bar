@@ -44,6 +44,23 @@ final class ModelMenuLocatorTests: XCTestCase {
         XCTAssertTrue(found?.recent.first === recent)
         XCTAssertTrue(found?.matching.first === matching)
     }
+    func testRecentUltrafastPresetRequiresHighlightingTheCatalogueRow() throws {
+        let recent = Node("option", "1 GPT-6.2 Sol High Ultrafast")
+        let matching = Node("option", "GPT-6.2 Sol")
+        let list = Node("listbox", "", [
+            Node("text", "Recent models"), recent, Node("text", "Matching models"), matching
+        ])
+        let found = try XCTUnwrap(locator.locate(in: Node("web", "", [input, list]), composer: input))
+        XCTAssertFalse(found.canChooseMatchingModel { $0 === recent })
+        XCTAssertTrue(found.canChooseMatchingModel { $0 === matching })
+        XCTAssertFalse(found.canChooseMatchingModel { _ in false })
+        XCTAssertFalse(found.canChooseMatchingModel { _ in true })
+
+        list.children = Array(list.children.prefix(2))
+        let recentOnly = try XCTUnwrap(locator.locate(in: Node("web", "", [input, list]), composer: input))
+        XCTAssertFalse(recentOnly.canChooseMatchingModel { _ in true })
+    }
+
     func testPopupFindsFilteredMatchingSectionWithoutRecentResults() {
         let search = Node("search"), matching = Node("option", "Opus 5.5")
         let view = Node("web", "", [input, popup(search: search, sections: [section("Matching models", [matching])])])
@@ -51,6 +68,7 @@ final class ModelMenuLocatorTests: XCTestCase {
         XCTAssertTrue(found?.searchInput === search)
         XCTAssertEqual(found?.recent.count, 0)
         XCTAssertTrue(found?.matching.first === matching)
+        XCTAssertEqual(found?.canChooseMatchingModel { _ in false }, true)
     }
     func testPopupWithoutItsOwnSearchInputSearchesThroughTheListBoxNotTheComposer() {
         let list = Node("listbox", "", [section("Recent models", [Node("option")])])

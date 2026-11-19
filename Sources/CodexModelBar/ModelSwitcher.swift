@@ -22,8 +22,8 @@ import CodexModelBarCore
 ///  2. Focus the message box, verify, send Control+Command+M, wait for the menu.
 ///  3. Type the model's id as the menu's search (the menu reads its search
 ///     from its popup input, or the message box on older Codex). Once every visible
-///     result is the target model, press Return. Choosing removes the search text again; Codex keeps the current effort
-///     when the new model supports it.
+///     result is the target model, choose a row under Matching models. Codex applies
+///     the model without restoring a recent preset's speed or reasoning. — GPT-6.2 Sol
 ///  4. Return immediately after choosing; the existing watcher reads the actual model.
 ///     Only the combined Astra/Ultrafast action waits before its dependent speed step.
 ///
@@ -216,17 +216,17 @@ final class ModelSwitcher {
         }
         // Preserve the user-confirmed typing cadence before the single target-readiness poll.
         usleep(37_500)
-        // Recent configurations and catalogue hits can repeat the target. Return picks
-        // the highlighted result, so every visible result must name that same model.
-        let onlyTarget = poll(timeout: 1.5) { () -> Bool? in
-            guard let menu = CodexUI.modelMenu(near: composer),
+        // A recent preset can name the right model but restore its saved speed and reasoning.
+        // Require a catalogue hit and keep the existing exact-model guard for visible results.
+        let matchingMenu = poll(timeout: 1.5) { () -> CodexUI.ModelMenu? in
+            guard let menu = CodexUI.modelMenu(near: composer), !menu.matching.isEmpty,
                   CFEqual(menu.searchInput ?? composer, searchInput) else { return nil }
             let entries = menu.recent + menu.matching
             guard CurrentModelMatcher.searchResultsOnlyMatch(target.id, titles: entries.map(CodexUI.modelMenuEntryTitle), among: allModels)
             else { return nil }
-            return true
+            return menu
         }
-        guard onlyTarget == true else {
+        guard let matchingMenu else {
             let menu = CodexUI.modelMenu(near: composer)
             Log.info("model-switch attempt=\(attempt) phase=search-not-isolated target=\(target.id) keyboardOwner=\(AX.keyboardOwnerPID().map(String.init) ?? "none") entries=\(((menu?.recent ?? []) + (menu?.matching ?? [])).map(CodexUI.modelMenuEntryTitle))")
             return abandonSearch(typed, before: before, composer: composer, pid: pid, searchInput: searchInput,
@@ -247,7 +247,33 @@ final class ModelSwitcher {
                                  window: window, models: allModels, allowPanelRecovery: true,
                                  retryAfterPanelLoss: retryAfterPanelLoss)
         }
-        Log.info("choosing search result for '\(query)' with Return")
+        func isSelected(_ row: AXUIElement) -> Bool {
+            (AX.attribute(row, kAXSelectedAttribute) as Bool?) == true
+        }
+        func menuStillOwnsKeys() -> Bool {
+            !Keyboard.userInteracted(since: searchStartedAt)
+                && AX.focusedWindow(pid: pid).map { CFEqual($0, window) } == true
+                && isFocused(searchInput, pid: pid)
+        }
+        for _ in matchingMenu.recent {
+            if matchingMenu.canChooseMatchingModel(isSelected: isSelected) { break }
+            // Codex's popup advances one row with Down. Wait for the highlight
+            // to leave the previous preset before sending another key.
+            guard let preset = matchingMenu.recent.first(where: isSelected),
+                  menuStillOwnsKeys(), Keyboard.pressUnlessTyping(Keyboard.downArrow, pid: pid),
+                  waitUntil(timeout: 0.45, {
+                      menuStillOwnsKeys() && !isSelected(preset)
+                          && (matchingMenu.recent + matchingMenu.matching).contains(where: isSelected)
+                  }) else { break }
+        }
+        guard matchingMenu.canChooseMatchingModel(isSelected: isSelected), menuStillOwnsKeys() else {
+            let result: Result = Keyboard.userInteracted(since: searchStartedAt)
+                ? .cancelledForTyping : .failed("Could not highlight the matching model without restoring a recent preset")
+            return abandonSearch(typed, before: before, composer: composer, pid: pid, searchInput: searchInput,
+                                 since: searchStartedAt, result: result, window: window, models: allModels,
+                                 retryAfterPanelLoss: nil)
+        }
+        Log.info("choosing catalogue result for '\(query)' with Return")
         let chosenAt = ProcessInfo.processInfo.systemUptime
         guard Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
             return abandonSearch(typed, before: before, composer: composer, pid: pid, searchInput: searchInput,
@@ -485,6 +511,7 @@ enum Keyboard {
     static let escape: CGKeyCode = 53
     static let backspace: CGKeyCode = 51
     static let returnKey: CGKeyCode = 36
+    static let downArrow: CGKeyCode = 125
 
     /// True when a real (hardware) key went down within `interval` seconds. Our own
     /// synthetic events are private-source events posted to one process, so they do not

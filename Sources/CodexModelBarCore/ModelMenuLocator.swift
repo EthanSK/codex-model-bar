@@ -5,6 +5,13 @@ public struct ModelMenuLocator<Node> {
         public var recent: [Node]
         public var matching: [Node]
         public var searchInput: Node?
+
+        /// Recent rows carry saved speed and reasoning. Return is safe only on a matching catalogue row. — GPT-6.2 Sol
+        public func canChooseMatchingModel(isSelected: (Node) -> Bool) -> Bool {
+            guard !matching.isEmpty else { return false }
+            if recent.isEmpty { return true }
+            return !recent.contains(where: isSelected) && matching.filter(isSelected).count == 1
+        }
     }
 
     public let children: (Node) -> [Node]

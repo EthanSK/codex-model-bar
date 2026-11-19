@@ -318,3 +318,10 @@ The M5's Opus 5.5 and Fable 5.1 entries come from claude-in-codex, not from Mode
 ## 2026-11-14 — Prefer the side of Agent Flow toward Codex's centre
 
 Ethan requested that a Flow panel right of the Codex window's centre put the custom bar on its left, and a panel left of centre put the bar on its right. Compare the two window centres in the existing Cocoa coordinate space, separately for each Codex window. Measure the preferred left anchor using that candidate's actual wrapped width so a narrow strip remains flush beside Flow. Keep the existing bottom-edge distance, fewer-row preference, obstacle checks and clear-normal-position restoration. This supersedes the fixed right-side preference from November 2. Task: `01a0d315-7d5e-7be0-bc08-80626ca0729b`.
+
+
+## 1.2.83: choose Matching models to preserve chat settings
+
+Codex 26.1111.21308 can show a recent preset and a catalogue result for the same model after a search. The recent row applies its stored model, reasoning effort and service tier. The catalogue row passes no service-tier override and forwards the chat's existing reasoning effort when the target offers it. This distinction explained a Standard-to-Ultrafast change on a GPT-6.1 Sol to GPT-6.2 Sol switch. Matching the model name alone did not distinguish the rows.
+
+Keep the typed search and its exact-target guard. When a recent row is highlighted, use the popup's native Down navigation and wait for the selection to advance. Choose only a confirmed row in Matching models when recent presets are present. With catalogue results alone, the existing fast path needs no navigation. Selecting a model does not need an automatic speed toggle. The explicit Astra Ultrafast action still uses its existing separate speed step.
