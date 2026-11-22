@@ -6,7 +6,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 BASE="$HOME/Library/Application Support/Codex Model Bar"
 COMPLETE="$BASE/claude-setup-complete"
-REVISION=6c05c310455601fde62fc10257011b484c498f0d
+REVISION=0458bea3777175f77e969b303ad1cda13632b626
 if [ -f "$COMPLETE" ]; then echo 'Claude setup already completed'; exit 0; fi
 if [ -f "$HOME/Library/LaunchAgents/com.codex-claude-bridge.plist" ]; then
   INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$HOME/Library/LaunchAgents/com.codex-claude-bridge.plist" 2>/dev/null || true)
@@ -39,4 +39,4 @@ fi
 # The bridge owns provider routing, config backups, npm dependencies and launchd.
 /bin/bash "$TARGET/scripts/install.sh"
 printf '%s\n' "$REVISION" > "$COMPLETE"
-echo 'Claude bridge configured. Restart Codex to load Opus 5.5 and Fable 5.1.'
+echo 'Claude bridge configured. Restart Codex to load the new model choices.'

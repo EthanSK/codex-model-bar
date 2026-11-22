@@ -325,3 +325,7 @@ Ethan requested that a Flow panel right of the Codex window's centre put the cus
 Codex 26.1111.21308 can show a recent preset and a catalogue result for the same model after a search. The recent row applies its stored model, reasoning effort and service tier. The catalogue row passes no service-tier override and forwards the chat's existing reasoning effort when the target offers it. This distinction explained a Standard-to-Ultrafast change on a GPT-6.1 Sol to GPT-6.2 Sol switch. Matching the model name alone did not distinguish the rows.
 
 Keep the typed search and its exact-target guard. When a recent row is highlighted, use the popup's native Down navigation and wait for the selection to advance. Choose only a confirmed row in Matching models when recent presets are present. With catalogue results alone, the existing fast path needs no navigation. Selecting a model does not need an automatic speed toggle. The explicit Astra Ultrafast action still uses its existing separate speed step.
+
+## 1.2.84: check the bundled bridge on a fresh install
+
+The model bar reads the Codex catalogue, while its fresh-install script pins a bridge revision. A Mac with a separately maintained bridge can show newer models even when the public installer points to an older revision. When auditing a release, check the bundled pin and its model defaults separately from the local catalogue. Updating the pin affects fresh setup. The installer preserves existing services and completed setup markers. Gemini 4 Neon uses the bridge's optional Antigravity setup.
