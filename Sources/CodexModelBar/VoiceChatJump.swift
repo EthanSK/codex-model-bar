@@ -1,6 +1,5 @@
 import AppKit
 import ApplicationServices
-import SQLite3
 import CodexModelBarCore
 
 // MARK: - Voice chat jump
@@ -10,74 +9,46 @@ import CodexModelBarCore
 // Requested by Ethan 2026-11-11 (Claude session local_f5bfc491). Codex owns the pill,
 // so this is a companion window that follows it; Codex itself is never patched.
 //
-// Lifecycle:
-//   hidden ──(poll finds "Stop voice chat" in Codex's overlay)──▶ shown beside the pill
-//   shown  ──(pill moves)──▶ follows it on the next 0.5 s poll
-//   shown  ──(call ends: overlay window disappears)──▶ hidden
-//   click  ──▶ busy: find the marked sidebar row ▶ scroll it into view ▶ resolve its ID
-//          ──▶ open codex://threads/<id> in the running Codex ▶ scroll again ▶ idle
-//
-// Identity comes only from Codex's own "Voice chat active" row marker (see
-// VoiceChatLocator.swift for the measured evidence). Like every other bar action this
-// sends its best attempt and does not verify the result (Ethan, 2026-10-29).
+// The bar owns only the floating button. H Chat's Show Voice command owns
+// current-call identity and opening the conversation, including when the sidebar
+// is closed or missing its live Voice marker.
 
-/// Read-only access to Codex's thread table, used only on a click.
-enum CodexThreadIndex {
-    /// Codex's newest `~/.codex/state_<N>.sqlite`. Codex bumps the number on schema
-    /// migrations (state_5 on 2026-11-11), so pick the highest rather than hard-coding it.
-    static func databaseURL(codexHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) -> URL? {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: codexHome.path)) ?? []
-        let numbered = names.compactMap { name -> (Int, String)? in
-            guard name.hasPrefix("state_"), name.hasSuffix(".sqlite") else { return nil }
-            let digits = name.dropFirst("state_".count).dropLast(".sqlite".count)
-            return Int(digits).map { ($0, name) }
-        }
-        return numbered.max { $0.0 < $1.0 }.map { codexHome.appendingPathComponent($0.1) }
-    }
+enum HChatShowVoice {
+    static let installedApp = URL(fileURLWithPath: "/Applications/HelloChat.app", isDirectory: true)
+    private static let minimumBuild = 1054 // H Chat e063ed1 first handled --show-current-voice before normal app startup.
+    private static let couldNotOpen = "Couldn't open the current Voice chat"
 
-    /// Every non-archived thread, or nil when the database cannot be read.
-    ///
-    /// Opens read-only with a short busy timeout: Codex writes this WAL database
-    /// continuously, and a click must not wait long behind one of its writes. Nothing
-    /// here can modify Codex's state.
-    static func records(at url: URL) -> [CodexThreadRecord]? {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db)
-            return nil
+    /// Runs H Chat's command helper away from the main and Accessibility queues. — GPT-6.2 Sol
+    static func openCurrentCall(in app: URL) -> String? {
+        guard let bundle = Bundle(url: app), bundle.bundleIdentifier == "com.ethansk.HeyChat" else {
+            return "Install H Chat to show the Voice chat"
         }
-        defer { sqlite3_close(db) }
-        sqlite3_busy_timeout(db, 250)
-        // `attached_thread_parent_id` separates side chats from sidebar rows. If a future
-        // schema drops it, read without it rather than failing the whole jump.
-        let queries = [
-            "SELECT id, name, title, archived, attached_thread_parent_id FROM threads WHERE archived = 0",
-            "SELECT id, name, title, archived, NULL FROM threads WHERE archived = 0",
-        ]
-        for sql in queries {
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-                sqlite3_finalize(statement)
-                continue
-            }
-            defer { sqlite3_finalize(statement) }
-            var records: [CodexThreadRecord] = []
-            while true {
-                let step = sqlite3_step(statement)
-                if step == SQLITE_DONE { return records }
-                guard step == SQLITE_ROW else { return nil } // Busy or corrupt: report unreadable instead of a partial list that could make a duplicate look unique.
-                records.append(CodexThreadRecord(id: text(statement, 0) ?? "", name: text(statement, 1),
-                                                 title: text(statement, 2) ?? "",
-                                                 archived: sqlite3_column_int(statement, 3) != 0,
-                                                 attachedParentID: text(statement, 4)))
-            }
+        guard let version = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+              let build = Int(version), build >= minimumBuild else {
+            return "Update H Chat to show the Voice chat"
         }
-        return nil
-    }
-
-    private static func text(_ statement: OpaquePointer, _ column: Int32) -> String? {
-        guard sqlite3_column_type(statement, column) != SQLITE_NULL, let raw = sqlite3_column_text(statement, column) else { return nil }
-        return String(cString: raw)
+        guard let executable = bundle.executableURL,
+              FileManager.default.isExecutableFile(atPath: executable.path) else { return couldNotOpen }
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executable
+        process.arguments = ["--show-current-voice"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            Log.info("voice-jump h-chat launch failed")
+            return couldNotOpen
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        Log.info("voice-jump h-chat exit=\(process.terminationStatus)")
+        guard process.terminationReason == .exit else { return couldNotOpen }
+        guard process.terminationStatus != 0 else { return nil }
+        let message = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).first
+        return message.map { String($0.prefix(160)) } ?? couldNotOpen
     }
 }
 
@@ -123,7 +94,7 @@ final class VoiceJumpPanel: NSPanel {
         button.imagePosition = .imageOnly
         button.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Show Voice chat")
         button.contentTintColor = .labelColor
-        button.toolTip = "Show this Voice chat in Codex's sidebar"
+        button.toolTip = "Show this Voice chat in Codex"
         button.setAccessibilityLabel("Show Voice chat in Codex")
         button.target = self
         button.action = #selector(clicked)
@@ -196,8 +167,9 @@ final class VoiceChatJump {
     /// one AX window-list read per tick (plus ~80 overlay nodes while a call is live).
     static let pollInterval: TimeInterval = 0.5
 
-    private let panel = VoiceJumpPanel()
+    private let panel: VoiceJumpPanel
     private let codexApp: () -> NSRunningApplication?
+    private let showCurrentCall: () -> String?
     private var timer: Timer?
     private var pollInFlight = false
     private var pillFrame: CGRect?
@@ -214,15 +186,17 @@ final class VoiceChatJump {
                 let description = AX.string(element, kAXDescriptionAttribute)
                 return description.isEmpty ? AX.title(element) : description
             },
-            classes: { AX.attribute($0, "AXDOMClassList") ?? [] }, // Chromium's DOM class list; identifies `sidebar-item` rows.
             frame: { CodexWindowTracker.axFrame($0) }
         )
     }
 
-    init(codexApp: @escaping () -> NSRunningApplication?) {
+    init(codexApp: @escaping () -> NSRunningApplication?, panel: VoiceJumpPanel? = nil,
+         showCurrentCall: @escaping () -> String? = { HChatShowVoice.openCurrentCall(in: HChatShowVoice.installedApp) }) {
         self.codexApp = codexApp
-        panel.onClick = { [weak self] in self?.jump() }
-        panel.onSizeChange = { [weak self] in self?.placePanel() }
+        self.panel = panel ?? VoiceJumpPanel()
+        self.showCurrentCall = showCurrentCall
+        self.panel.onClick = { [weak self] in self?.jump() }
+        self.panel.onSizeChange = { [weak self] in self?.placePanel() }
     }
 
     func start() {
@@ -297,93 +271,19 @@ final class VoiceChatJump {
     // MARK: Jumping
 
     private func jump() {
-        guard !isBusy, let codex = codexApp(), let codexURL = codex.bundleURL else { return }
+        guard !isBusy else { return }
         isBusy = true
         panel.setBusy(true)
         panel.showNotice(nil)
-        let pid = codex.processIdentifier
-        AX.enqueueAction { // A user action: the background composer poll yields to it.
-            let rows = Self.activeRows(pid: pid)
-            Self.scroll(rows) // Scroll first in every window that shows the row, so whichever window Codex navigates already has it in view.
-            let resolution: VoiceChatResolution?
-            if rows.isEmpty {
-                resolution = .noActiveRow // No need to read the database.
-            } else if let url = CodexThreadIndex.databaseURL(), let records = CodexThreadIndex.records(at: url) {
-                resolution = VoiceChatResolver.resolve(activeRowTitles: rows.map(\.title), threads: records)
-            } else {
-                resolution = nil
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.finish(resolution, rowCount: rows.count, pid: pid, codexURL: codexURL)
-            }
+        let finish = { [weak self] (notice: String?) in
+            guard let self else { return }
+            self.isBusy = false
+            self.panel.setBusy(false)
+            self.panel.showNotice(notice)
         }
-    }
-
-    private func finish(_ resolution: VoiceChatResolution?, rowCount: Int, pid: pid_t, codexURL: URL) {
-        // Diagnostics record the outcome only, never chat names or IDs.
-        guard case .thread(let id, _) = resolution, let link = CodexThreadLink.url(forThreadID: id) else {
-            let text: String
-            switch resolution {
-            case nil: text = "Couldn't read Codex's chat list"
-            case .noActiveRow?: text = "Codex's sidebar isn't showing the Voice chat"
-            case .conflictingRows?: text = "Codex windows disagree on the Voice chat"
-            case .noMatchingThread?: text = "Couldn't identify this Voice chat"
-            case .ambiguous(_, let count)?: text = "\(count) chats share this Voice chat's name"
-            case .thread?: text = "Couldn't build the chat link"
-            }
-            Log.info("voice-jump refused reason=\(Self.reasonName(resolution)) marked-rows=\(rowCount)")
-            return done(notice: text)
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        // Send the link to the running Codex explicitly: another installed app could also
-        // claim the `codex` scheme, and LaunchServices might otherwise pick it.
-        NSWorkspace.shared.open([link], withApplicationAt: codexURL, configuration: configuration) { [weak self] _, error in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if let error {
-                    Log.info("voice-jump open-failed error=\(error.localizedDescription)")
-                    return self.done(notice: "Codex didn't open the Voice chat")
-                }
-                Log.info("voice-jump opened marked-rows=\(rowCount)")
-                self.done(notice: nil)
-                // Codex re-renders its sidebar after navigating, so scroll the marked row
-                // into view once more in whichever window it chose. This completes the
-                // reveal; it is not a success check, and nothing waits on it.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    AX.enqueueAction { Self.scroll(Self.activeRows(pid: pid)) }
-                }
-            }
-        }
-    }
-
-    private func done(notice: String?) {
-        isBusy = false
-        panel.setBusy(false)
-        panel.showNotice(notice)
-    }
-
-    /// Every marked row in every Codex task window. Call on `AX.queue`.
-    private static func activeRows(pid: pid_t) -> [VoiceChatLocator<AXUIElement>.ActiveRow] {
-        let windows: [AXUIElement] = AX.attribute(AXUIElementCreateApplication(pid), kAXWindowsAttribute) ?? []
-        return windows.filter { AX.string($0, kAXSubroleAttribute) == kAXStandardWindowSubrole as String }
-            .flatMap { locator.activeVoiceRows(inWindow: $0) }
-    }
-
-    /// Asks Chromium to scroll each row into view (its `scrollIntoView`). Moves no
-    /// cursor and changes no focus. Call on `AX.queue`.
-    private static func scroll(_ rows: [VoiceChatLocator<AXUIElement>.ActiveRow]) {
-        for row in rows { AXUIElementPerformAction(row.row, "AXScrollToVisible" as CFString) }
-    }
-
-    private static func reasonName(_ resolution: VoiceChatResolution?) -> String {
-        switch resolution {
-        case nil: return "database-unreadable"
-        case .noActiveRow?: return "no-marked-row"
-        case .conflictingRows(let titles)?: return "conflicting-rows-\(titles.count)"
-        case .noMatchingThread?: return "no-matching-thread"
-        case .ambiguous(_, let count)?: return "ambiguous-\(count)"
-        case .thread?: return "invalid-thread-id"
+        DispatchQueue.global(qos: .userInitiated).async { [showCurrentCall] in
+            let notice = showCurrentCall()
+            DispatchQueue.main.async { finish(notice) }
         }
     }
 }

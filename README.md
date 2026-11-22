@@ -83,17 +83,9 @@ The slider and mouse deliberately keep native increase/decrease commands: these 
 
 ### Jump to the live Voice chat
 
-From 1.2.77, while a Codex Voice call is live, a small round **sidebar** button appears just right of Codex's floating Voice pill (on its left at a screen edge). Click it to open that exact Voice chat in Codex, with its sidebar row scrolled into view and selected. The button follows the pill over any app and disappears when the call ends. It never takes keyboard focus, and does nothing to the call itself.
+While a Codex Voice call is live, a small round button follows Codex’s floating Voice controls. Click it to open the chat that owns the call. The button runs the same Show Voice command as H Chat’s spoken shortcut. H Chat identifies the live call independently of the sidebar and opens its chat in the running Codex app.
 
-- **Which chat.** Codex marks the sidebar row of the chat that owns the live call with a **Voice chat active** icon. The button uses only that marker. It never guesses from the frontmost chat, the newest chat or a `🗣️ Voice |` title: on 2026-11-11 the live call belonged to a chat with an ordinary title.
-- **How it opens.** The marked row has no thread ID or press action, so the bar looks up the row's exact name in Codex's local chat database, read-only. It opens the chat only when exactly one live, top-level chat has that name, using Codex's own `codex://threads/<id>` link. Side chats and archived chats are ignored. It then asks Codex to scroll the row into view in each window that shows it.
-- **When it refuses.** A short notice appears beside the button instead if:
-  - the sidebar shows no marked row (for example the sidebar is collapsed);
-  - two windows mark different chats;
-  - several chats share the Voice chat's name;
-  - the chat or the database cannot be found.
-- **What it costs.** While Codex runs, the bar checks every 0.5 s for Codex's Voice overlay (a non-standard Codex window at least half a display in size). With no overlay that is one window-list read (about 0.3 ms); with one it reads at most 400 elements of that window only. It yields to any queued model, reasoning or speed click. It never reads a chat's transcript; the click-time sidebar search skips the open conversation.
-- **Limits.** Labels are matched in English. With several Codex windows, Codex chooses which window the link navigates. As with every other bar action, the result is not verified afterwards.
+This button requires [H Chat](https://github.com/EthanSK/hello-chat) build 1054 or later in Applications. If the helper is missing, too old, or unable to identify the call, the bar shows a short notice.
 
 ## Limits and privacy
 
@@ -101,7 +93,7 @@ From 1.2.77, while a Codex Voice call is live, a small round **sidebar** button 
 - Accessibility access allows the app to inspect Codex's window and composer. The model switcher reads the draft before a search and when an abandoned search needs cleanup; the combined Astra action also reads it after choosing. The reasoning control reads the composer's model and effort title, and the speed button reads whether that button shows its speed icon. Speed requests retain the original input’s selection and use the Codex input’s character count when placing its caret; they do not read draft text or verify speed afterward. It does not store chat text or include telemetry. It stores your hidden-button choices in macOS preferences and caches model names and supported effort levels locally in Application Support.
 - Diagnostics stay on your Mac at `~/Library/Logs/Codex Model Bar/diagnostic.log`. They record app version, model/effort, opaque input and container identities, focus flags, lookup decisions, switch stages, timing and failure reasons. Ordinary model/reasoning actions record a request, not a confirmation. Toolbar focus handoffs record the original owner PID and whether restoration was confirmed. Confirmation for the combined Astra action records composer identity and replacement; abandoned-search cleanup records whether restoration was observed, text remains, or the draft was unreadable/changed. They exclude draft text, chat content, task titles and individual keystrokes. The current log and one previous log are each limited to 2 MiB and readable only by your macOS user. Include the relevant failure entries when reporting a problem; nothing is uploaded automatically.
 - A switch can stop when Codex is not ready, its menu has changed, or you are actively typing. The strip reports the failure. If an abandoned search is still visible but cannot safely be removed, it tells you what remains. An unavailable or changed draft is recorded as unverified, not proof of leftover text. A request that finishes at Return is not a guarantee that Codex accepted it; the background watcher reports the actual selection.
-- The Voice chat button reads Codex's floating Voice overlay, the sidebar row names Codex marks, and (only on a click) chat IDs, names and titles from `~/.codex/state_<N>.sqlite`, opened read-only. Diagnostics record only the outcome, never chat names or IDs.
+- The Voice chat button reads the floating overlay to place itself. H Chat handles call identity and navigation after a click. The bar logs the command’s exit status.
 - Source builds use your local signing identity. Public downloads pass Developer ID signing, Apple notarization and Sparkle feed signing before publication.
 
 ## Develop

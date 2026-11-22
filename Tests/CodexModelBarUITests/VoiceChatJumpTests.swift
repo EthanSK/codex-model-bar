@@ -1,7 +1,6 @@
+// Exercises the floating AppKit button with a disposable H Chat command helper.
 import AppKit
-import SQLite3
 import XCTest
-import CodexModelBarCore
 @testable import CodexModelBar
 
 final class VoiceChatJumpTests: XCTestCase {
@@ -16,49 +15,67 @@ final class VoiceChatJumpTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    /// Builds a tiny stand-in for Codex's `threads` table with only the columns read.
-    private func makeDatabase(named name: String, withAttachedColumn: Bool = true, rows: [String]) throws -> URL {
-        let url = directory.appendingPathComponent(name)
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        let attached = withAttachedColumn ? ", attached_thread_parent_id TEXT" : ""
-        let statements = ["CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT NOT NULL, archived INTEGER NOT NULL\(attached))"] + rows
-        for sql in statements { XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql) }
-        return url
+    private func makeHelper(build: String, reply: String = "", status: Int = 0) throws -> (app: URL, invocations: URL) {
+        let app = directory.appendingPathComponent("HelloChat.app", isDirectory: true)
+        let files = app.appendingPathComponent("Contents", isDirectory: true)
+        let binaries = files.appendingPathComponent("MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: binaries, withIntermediateDirectories: true)
+        let plist = [
+            "CFBundleIdentifier": "com.ethansk.HeyChat",
+            "CFBundleVersion": build,
+            "CFBundleExecutable": "HelloChat",
+            "CFBundlePackageType": "APPL",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: files.appendingPathComponent("Info.plist"))
+        let executable = binaries.appendingPathComponent("HelloChat")
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@" >> "${0%/*}/invocations"
+        [ "$#" -eq 1 ] && [ "$1" = '--show-current-voice' ] || exit 2
+        printf '%s\\n' "\(reply)"
+        exit \(status)
+
+        """.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        return (app, binaries.appendingPathComponent("invocations"))
     }
 
-    func testReadsLiveThreadsAndSkipsArchivedOnes() throws {
-        let url = try makeDatabase(named: "state_5.sqlite", rows: [
-            "INSERT INTO threads VALUES ('a', NULL, 'Voice chat', 0, NULL)",
-            "INSERT INTO threads VALUES ('b', 'Renamed', 'Raw title', 0, 'a')",
-            "INSERT INTO threads VALUES ('c', NULL, 'Old', 1, NULL)",
-        ])
-        let records = try XCTUnwrap(CodexThreadIndex.records(at: url)).sorted { $0.id < $1.id }
-        XCTAssertEqual(records, [
-            CodexThreadRecord(id: "a", name: nil, title: "Voice chat", archived: false, attachedParentID: nil),
-            CodexThreadRecord(id: "b", name: "Renamed", title: "Raw title", archived: false, attachedParentID: "a"),
-        ])
-    }
-
-    func testOlderSchemaWithoutTheAttachedColumnStillReads() throws {
-        let url = try makeDatabase(named: "state_4.sqlite", withAttachedColumn: false,
-                                   rows: ["INSERT INTO threads VALUES ('a', NULL, 'Voice chat', 0)"])
-        XCTAssertEqual(CodexThreadIndex.records(at: url)?.map(\.id), ["a"])
-    }
-
-    func testMissingDatabaseIsUnreadableNotEmpty() {
-        XCTAssertNil(CodexThreadIndex.records(at: directory.appendingPathComponent("state_9.sqlite")),
-                     "An unreadable list must refuse the jump, not report that no chat matched")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("state_9.sqlite").path),
-                       "Opening read-only must never create a database")
-    }
-
-    func testPicksTheNewestStateDatabase() throws {
-        for name in ["state_4.sqlite", "state_12.sqlite", "state_5.sqlite", "state_5.sqlite-wal", "goals_1.sqlite", "state_x.sqlite"] {
-            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: Data())
+    @MainActor
+    func testFloatingButtonRunsTheCanonicalCommandOnce() async throws {
+        _ = NSApplication.shared
+        let helper = try makeHelper(build: "1065", reply: "Opened the current Voice chat.")
+        let panel = VoiceJumpPanel()
+        let jump = VoiceChatJump(codexApp: { nil }, panel: panel) { HChatShowVoice.openCurrentCall(in: helper.app) }
+        let finished = expectation(description: "The button re-enables after its command finishes")
+        panel.onSizeChange = {
+            if panel.button.isEnabled { finished.fulfill() }
         }
-        XCTAssertEqual(CodexThreadIndex.databaseURL(codexHome: directory)?.lastPathComponent, "state_12.sqlite")
+
+        panel.button.performClick(nil)
+        XCTAssertFalse(panel.button.isEnabled)
+        panel.onClick?() // Even another action delivered during the command must not launch a second helper.
+        await fulfillment(of: [finished], timeout: 3)
+        let arguments = try String(contentsOf: helper.invocations, encoding: .utf8)
+        XCTAssertEqual(arguments, "--show-current-voice\n")
+        XCTAssertEqual(panel.preferredSize, VoiceJumpPanel.buttonSize)
+        withExtendedLifetime(jump) {}
+    }
+
+    func testRefusesToLaunchOlderHChat() throws {
+        let helper = try makeHelper(build: "1050")
+        XCTAssertEqual(HChatShowVoice.openCurrentCall(in: helper.app), "Update H Chat to show the Voice chat")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: helper.invocations.path))
+    }
+
+    func testMissingHChatReturnsAnInstallNotice() {
+        XCTAssertEqual(HChatShowVoice.openCurrentCall(in: directory.appendingPathComponent("Missing.app")),
+                       "Install H Chat to show the Voice chat")
+    }
+
+    func testUsesTheHandlersInactiveMessage() throws {
+        let helper = try makeHelper(build: "1054", reply: "There’s no active Voice call.", status: 1)
+        XCTAssertEqual(HChatShowVoice.openCurrentCall(in: helper.app), "There’s no active Voice call.")
     }
 
     func testPanelNeverTakesFocusAndFloatsAboveCodexOverlay() {
@@ -69,7 +86,7 @@ final class VoiceChatJumpTests: XCTestCase {
         XCTAssertGreaterThan(panel.level.rawValue, NSWindow.Level.floating.rawValue, "Codex's overlay sits at the floating level")
         XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
         XCTAssertEqual(panel.preferredSize, VoiceJumpPanel.buttonSize)
-        panel.showNotice("Codex's sidebar isn't showing the Voice chat")
+        panel.showNotice("Couldn't identify the current Voice chat.")
         XCTAssertGreaterThan(panel.preferredSize.width, VoiceJumpPanel.buttonSize.width, "A notice widens the panel beside the button")
         panel.showNotice(nil)
         XCTAssertEqual(panel.preferredSize, VoiceJumpPanel.buttonSize)

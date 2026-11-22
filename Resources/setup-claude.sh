@@ -6,7 +6,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 BASE="$HOME/Library/Application Support/Codex Model Bar"
 COMPLETE="$BASE/claude-setup-complete"
-REVISION=0458bea3777175f77e969b303ad1cda13632b626
+REVISION=ae5025f4e3f7c4f1abd158e66c61ac8934394444
 if [ -f "$COMPLETE" ]; then echo 'Claude setup already completed'; exit 0; fi
 if [ -f "$HOME/Library/LaunchAgents/com.codex-claude-bridge.plist" ]; then
   INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$HOME/Library/LaunchAgents/com.codex-claude-bridge.plist" 2>/dev/null || true)

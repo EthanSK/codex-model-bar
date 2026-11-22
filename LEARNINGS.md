@@ -29,7 +29,15 @@ The locator now returns the popup's unique search field together with its result
 
 Tests use a labelled source-derived tree, not a purported live AX capture. They preserve the older adjacent/portal menu cases and reject duplicate menus, duplicate search fields and embedded-browser results. Native Chromium web options can map to menu items or selectable static text; visible names can be AXTitle or AXValue. The installed user's first real switch remains the acceptance gate when live agent control is unavailable.
 
+## 1.2.85: the floating button uses H Chat’s Show Voice command
+
+The sidebar badge can be absent during a live call, even when H Chat can open its chat. The button now sends `--show-current-voice` to the installed H Chat command helper. The spoken shortcut and the helper share `ShowVoiceCommand.perform()`. H Chat checks the active call and the running Codex PID before opening its link. The bar still follows the floating Voice overlay and yields its overlay poll to model, reasoning and speed actions.
+
+H Chat commit `e063ed1` introduced the CLI flag in build 1054. The bar checks the helper’s bundle identity and build before executing it. An older build could treat an unknown flag as normal app startup. The AppKit test clicks the real button with a disposable helper and verifies one exact command invocation.
+
 ## 1.2.77: a button beside Codex's Voice pill opens the live Voice chat
+
+The sidebar and database navigation described below was replaced in 1.2.85. The floating pill detection and placement still apply.
 
 Ethan asked for a control beside the floating panel that appears when a Codex Voice call starts, which reveals and selects that exact live chat in the sidebar (Claude session local_f5bfc491, 2026-11-11). The panel, marker and identity facts were read with Accessibility during one live call in one Codex window on Codex 26.1103.60933 (build 25894); the landmark and pruning timings were taken just after that call ended. Nothing was clicked in Codex.
 
