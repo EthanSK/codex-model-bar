@@ -3,83 +3,108 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#e9eff5">
-  <meta name="description" content="A thin macOS bar for switching the open Codex task's model and reasoning level.">
+  <meta name="theme-color" content="#eef3f8">
+  <meta name="description" content="Switch models, reasoning and response speed from a macOS toolbar beside Codex.">
   <meta property="og:title" content="Codex Model Bar">
-  <meta property="og:description" content="Models and reasoning, right below Codex.">
+  <meta property="og:description" content="Switch models, reasoning and response speed from a macOS toolbar beside Codex.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://ethansk.github.io/codex-model-bar/">
-  <meta property="og:image" content="https://ethansk.github.io/codex-model-bar/assets/app-icon.png">
+  <meta property="og:image" content="https://ethansk.github.io/codex-model-bar/assets/model-bar.png">
+  <meta property="og:image:alt" content="The Codex composer above the Model Bar, with GPT-6.2 Sol selected.">
+  <link rel="canonical" href="https://ethansk.github.io/codex-model-bar/">
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="styles.css?v=2">
-  <script src="script.js?v=2" defer></script>
-  <title>Codex Model Bar — models and reasoning below Codex</title>
+  <link rel="stylesheet" href="styles.css?v=3">
+  <title>Codex Model Bar for macOS</title>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header wrap">
-    <a class="brand" href="./" aria-label="Codex Model Bar home">
-      <img src="assets/app-icon.png" width="38" height="38" alt="">
+    <a class="brand" href="./">
+      <img src="assets/app-icon.png" width="32" height="32" alt="">
       <span>Codex Model Bar</span>
     </a>
     <nav aria-label="Main navigation">
-      <a href="#how">How it works</a>
-      <a href="#install">Build</a>
-      <a class="source-link" href="https://github.com/EthanSK/codex-model-bar">GitHub <span aria-hidden="true">↗</span></a>
+      <a href="#install">Install</a>
+      <a href="#more-models">More models</a>
+      <a href="https://github.com/EthanSK/codex-model-bar">GitHub</a>
     </nav>
   </header>
 
-  <main id="main">
-    <section class="hero wrap" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow">macOS companion app · source available</p>
-        <h1 id="hero-title">Models and reasoning, right below Codex.</h1>
-        <p class="intro">A thin strip follows your Codex window. Pick the model and reasoning level for the open task without losing your place or your draft.</p>
-        <div class="hero-actions">
-          <a class="primary-action" href="#install">Build the app <span aria-hidden="true">↗</span></a>
-          <a class="secondary-action" href="https://github.com/EthanSK/codex-model-bar">Source on GitHub</a>
-        </div>
+  <main class="wrap" id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <h1 id="hero-title">Model controls, right below Codex.</h1>
+      <p class="intro">Switch models, change reasoning and set response speed for the open chat from one small toolbar.</p>
+      <div class="actions">
+        <a class="primary-action" href="https://github.com/EthanSK/codex-model-bar/releases/latest/download/CodexModelBar-macOS-universal.zip">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>
+          Download for macOS
+        </a>
+        <a href="#install">Installation help</a>
       </div>
+      <p class="requirements">macOS 13 or later · Apple silicon and Intel</p>
 
-      <div class="stage">
-        <div class="app-window" aria-hidden="true">
-          <div class="window-top"><span class="traffic"><i></i><i></i><i></i></span><span>Codex</span><span class="window-top-end">⌘</span></div>
-          <div class="window-body"><div class="fake-sidebar"><span></span><span></span><span></span><span></span></div><div class="fake-task"><span class="task-line short"></span><span class="task-line"></span><span class="task-line middle"></span><div class="fake-composer"><span>Ask Codex anything</span><span class="composer-model">Opus 5.5</span></div></div></div>
+      <figure class="preview">
+        <a href="assets/model-bar.png" aria-label="View the full-size Codex Model Bar screenshot">
+          <img src="assets/model-bar.png" width="2290" height="356" alt="The Codex composer above the Model Bar. GPT-6.2 Sol is selected. Claude, Gemini 4 Neon, reasoning and response speed controls are also visible.">
+        </a>
+        <figcaption>The toolbar in Codex with Claude and Gemini 4 Neon set up.</figcaption>
+      </figure>
+    </section>
+
+    <section class="controls" id="how" aria-labelledby="controls-title">
+      <h2 id="controls-title">What the bar controls</h2>
+      <div class="controls-grid">
+        <div>
+          <h3>Model</h3>
+          <p>Pick a model with one click. Right-click the bar to choose which buttons to show.</p>
         </div>
-        <div class="preview-bar" role="group" aria-label="Model bar preview">
-          <button type="button" class="model-choice is-current" data-model="Opus 5.5" aria-pressed="true">Opus 5.5</button>
-          <button type="button" class="model-choice" data-model="Fable 5.1" aria-pressed="false">Fable 5.1</button>
-          <button type="button" class="model-choice" data-model="GPT-6 Sol" aria-pressed="false">GPT-6 Sol</button>
-          <button type="button" class="model-choice" data-model="GPT-6 Astra" aria-pressed="false">GPT-6 Astra</button>
-          <span class="preview-divider" aria-hidden="true"></span>
-          <label class="reasoning-preview" for="reasoning-preview-slider"><span>Reasoning <output id="reasoning-preview-value">Extra High</output></span><span class="preview-slider-track"><input id="reasoning-preview-slider" type="range" min="0" max="4" step="1" value="3" aria-label="Reasoning effort preview"><span class="preview-ticks" id="reasoning-preview-ticks" aria-hidden="true"></span></span></label>
+        <div>
+          <h3>Reasoning</h3>
+          <p>Use the slider to set a reasoning level supported by the selected model.</p>
         </div>
-        <p class="preview-note"><span class="note-dot" aria-hidden="true"></span> Preview only · <span id="preview-status" aria-live="polite">Opus 5.5 · Extra High</span></p>
+        <div>
+          <h3>Response speed</h3>
+          <p>Click the speed button to cycle through the options your Codex account offers.</p>
+        </div>
       </div>
     </section>
 
-    <section class="feature-section wrap" id="how" aria-labelledby="how-title">
-      <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="how-title">A shortcut that stays in sight.</h2></div>
-      <div class="feature-list">
-        <div class="feature"><span class="feature-mark">01</span><div><h3>Follows the window</h3><p>The 30-point bar sits under Codex when there is room, moves above it when needed, and hides when Codex is in the background.</p></div></div>
-        <div class="feature"><span class="feature-mark">02</span><div><h3>Fits your choices</h3><p>The strip fits its visible model buttons and a ticked reasoning slider. Right-click it to hide models you do not use, refresh the list, or change Open at login.</p></div></div>
-        <div class="feature"><span class="feature-mark">03</span><div><h3>Uses Codex's controls</h3><p>Model buttons use Codex's <code>/model</code> menu. The reasoning slider uses your configured Codex shortcuts. Both pause while you type.</p></div></div>
-      </div>
-    </section>
+    <div class="setup">
+      <section class="setup-panel" id="install" aria-labelledby="install-title">
+        <h2 id="install-title">Install on your Mac</h2>
+        <ol>
+          <li>Unzip the download and move Codex Model Bar to Applications.</li>
+          <li>Open the bar and grant Accessibility access when macOS asks.</li>
+          <li>Open the Codex desktop app. The bar follows its window.</li>
+        </ol>
+        <p>The signed, notarized app checks for updates automatically.</p>
+        <a href="https://github.com/EthanSK/codex-model-bar#install-from-source">Build from source <span aria-hidden="true">↗</span></a>
+      </section>
 
-    <section class="setup-section" id="install" aria-labelledby="install-title">
-      <div class="wrap setup-grid">
-        <div><p class="eyebrow">Install from source</p><h2 id="install-title">Build it on your Mac.</h2><p>Requires macOS 13+, the Codex desktop app, and Xcode Command Line Tools. Grant Accessibility access to Codex Model Bar when macOS asks.</p><p class="setup-small"><a href="https://github.com/EthanSK/codex-model-bar/releases/latest/download/CodexModelBar-macOS-universal.zip">Download the signed Mac app</a> for Apple silicon or Intel. Automatic updates are included.</p></div>
-        <div class="command-block"><div class="command-header">Terminal <span>macOS</span></div><pre><code>git clone https://github.com/EthanSK/codex-model-bar.git
-cd codex-model-bar
-swift test --scratch-path .build.noindex
-./scripts/build-app.sh</code></pre><a href="https://github.com/EthanSK/codex-model-bar#install-from-source">Full setup and signing notes <span aria-hidden="true">↗</span></a></div>
-      </div>
-    </section>
-
-    <section class="bridge-section wrap" aria-labelledby="bridge-title"><div class="bridge-icon" aria-hidden="true">↔</div><div><p class="eyebrow">More models</p><h2 id="bridge-title">Claude and Gemini alongside GPT.</h2><p>The bar reads the same model list Codex shows in its picker. <a href="https://github.com/EthanSK/claude-in-codex">Claude in Codex</a> adds Claude models and supports <a href="https://github.com/EthanSK/claude-in-codex#optional-gemini-4-neon">optional Gemini 4 Neon setup</a> through Antigravity.</p></div></section>
+      <section class="setup-panel" id="more-models" aria-labelledby="models-title">
+        <h2 id="models-title">Add Claude and Gemini</h2>
+        <p>The bar uses the models in your Codex picker. The Claude in Codex bridge can add these options alongside GPT.</p>
+        <div class="provider">
+          <h3>Claude</h3>
+          <p>Use Opus and Fable with Claude Code and your Claude login.</p>
+          <a href="https://github.com/EthanSK/claude-in-codex">Claude setup <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="provider">
+          <h3>Gemini 4 Neon</h3>
+          <p>Enable Neon in the bridge and sign in to Antigravity CLI with an eligible Google AI Pro or Ultra subscription.</p>
+          <a href="https://github.com/EthanSK/claude-in-codex#optional-gemini-4-neon">Gemini 4 Neon setup <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <footer class="site-footer"><div class="wrap footer-grid"><p>Codex Model Bar is an independent side project by Ethan SK, under <a href="https://github.com/EthanSK/codex-model-bar/blob/main/LICENSE">Apache 2.0 + Commons Clause v1.0</a>. Use and modify for yourself. See the license for its restriction on selling products or services based substantially on this software. <a href="https://github.com/EthanSK/codex-model-bar/blob/main/LICENSING.md">Scope and earlier permissions</a>.</p><p>Uses Codex desktop interfaces that may change in an update. Not affiliated with OpenAI or Anthropic.</p><a href="https://github.com/EthanSK/codex-model-bar">GitHub <span aria-hidden="true">↗</span></a></div></footer>
+  <footer class="site-footer wrap">
+    <p>An independent project by Ethan SK that uses Codex desktop controls.</p>
+    <div class="footer-links">
+      <a href="https://github.com/EthanSK/codex-model-bar/releases">Releases</a>
+      <a href="https://github.com/EthanSK/codex-model-bar/blob/main/LICENSE">Apache 2.0 + Commons Clause</a>
+      <a href="https://github.com/EthanSK/codex-model-bar/blob/main/LICENSING.md">License scope</a>
+    </div>
+  </footer>
 </body>
 </html>
