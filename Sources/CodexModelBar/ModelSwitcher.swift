@@ -132,38 +132,49 @@ final class ModelSwitcher {
         }
         let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
         guard let composer = located.composer, let button = located.modelButton,
-              CodexUI.isInConversation(composer, pane: pane),
-              CodexUI.composerText(composer) == "" else { return (.failed("composer-unavailable-or-has-draft"), nil, nil) }
-        let selection = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models)
+              CodexUI.isInConversation(composer, pane: pane), let draft = CodexUI.composerText(composer) else {
+            return (.failed("composer-unavailable"), nil, nil)
+        }
+        let modelTitle = AX.title(button)
+        let selection = CurrentModelMatcher.selection(forButtonTitle: modelTitle, among: models)
         guard let modelID = selection.modelID, selection.effort != nil,
               models.contains(where: { $0.id == modelID && $0.speedTiers.contains(.ultrafast) }) else {
             return (.failed("model-effort-or-tier-unavailable"), nil, nil)
         }
-        func sameWindow() -> Bool {
-            request.isCurrent && codex.isActive && AX.title(window) == request.chatTitle
+        func ownsComposer() -> Bool {
+            codex.isActive && !Keyboard.userInteracted(since: started) && AX.title(window) == request.chatTitle
                 && (AX.attribute(app, kAXFocusedWindowAttribute) as AXUIElement?).map { CFEqual($0, window) } == true
+                && CodexUI.isInConversation(composer, pane: pane) && CodexUI.composerText(composer) == draft
         }
-        let result = selectUltrafast(original: located, window: window, pid: pid, models: models,
-                                     selection: selection, requestedModelID: modelID, since: started,
-                                     preservingEffort: true, readOnly: request.verifyOnly == true,
-                                     stillAuthorized: sameWindow, canApply: {
-            HChatVoiceIdentity.matches(request) && sameWindow()
+        func trigger() -> AXUIElement? {
+            func matches(_ node: AXUIElement) -> Bool {
+                guard AX.role(node) == kAXPopUpButtonRole as String else { return false }
+                let title = AX.title(node)
+                return title == modelTitle || title == "Select effort"
+            }
+            if matches(button), CodexUI.isInConversation(button, pane: pane) { return button }
+            let buttons = AX.all(in: pane, limit: 2_000, where: matches)
+            return buttons.count == 1 ? buttons.first : nil
+        }
+        let result = CodexSpeedMenu.ultrafast(in: window, trigger: trigger, readOnly: request.verifyOnly == true,
+                                              ownsComposer: ownsComposer, maySelect: {
+            HChatVoiceIdentity.matches(request) && ownsComposer()
                 && CodexUI.exactConversation(in: window, title: request.chatTitle).map { CFEqual($0, pane) } == true
-        })
+        }, stillCurrent: { request.isCurrent })
         switch result {
-        case .switched, .alreadyCurrent:
-            guard HChatVoiceIdentity.matches(request), sameWindow(), !Keyboard.userInteracted(since: started),
+        case .applied, .alreadySelected:
+            guard HChatVoiceIdentity.matches(request), ownsComposer(),
                   CodexUI.exactConversation(in: window, title: request.chatTitle).map({ CFEqual($0, pane) }) == true,
-                  let latest = CodexUI.confirmSelection(modelID: modelID, effort: selection.effort, original: located,
-                                                       window: window, pid: pid, models: models, since: started,
-                                                       timeout: 0.4, logPrefix: "voice-speed"),
-                  let composer = latest.located.composer, CodexUI.composerText(composer) == "" else {
+                  poll(timeout: 0.6, {
+                      guard request.isCurrent, ownsComposer(), let button = trigger() else { return nil }
+                      return CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models) == selection ? true : nil
+                  }) == true else {
                 return (.failed("selection-or-composer-changed"), nil, nil)
             }
-            if case .switched = result { return (.switched(latest.selection), bounds, composer) }
-            return (.alreadyCurrent(latest.selection), bounds, composer)
-        default:
-            return (result, nil, nil)
+            if result == .applied { return (.switched(selection), bounds, composer) }
+            return (.alreadyCurrent(selection), bounds, composer)
+        case .refused(let reason):
+            return (.failed(reason), nil, nil)
         }
     }
 
@@ -378,11 +389,8 @@ final class ModelSwitcher {
     /// inspect again to confirm ON. Return is never sent without the exact live
     /// command entry, so an unavailable command cannot submit the user's draft.
     private static func selectUltrafast(original: CodexUI.Located, window: AXUIElement, pid: pid_t,
-                                       models: [CodexModel], selection: CurrentSelection, requestedModelID: String,
-                                       since started: TimeInterval, preservingEffort: Bool = false, readOnly: Bool = false,
-                                       stillAuthorized: () -> Bool = { true },
-                                       canApply: () -> Bool = { true }) -> Result {
-        guard stillAuthorized(), !Keyboard.userInteracted(since: started), selection.modelID == requestedModelID,
+                                       models: [CodexModel], selection: CurrentSelection, requestedModelID: String, since started: TimeInterval) -> Result {
+        guard !Keyboard.userInteracted(since: started), selection.modelID == requestedModelID,
               let identity = original.identity, let composer = original.composer,
               focus(composer, pid: pid), CodexUI.modelMenu(near: composer) == nil,
               let before = CodexUI.composerText(composer),
@@ -390,15 +398,12 @@ final class ModelSwitcher {
             return .failed("Could not safely open Ultrafast in this composer")
         }
         func sameComposer() -> Bool {
-            guard stillAuthorized(), !Keyboard.userInteracted(since: started),
+            guard !Keyboard.userInteracted(since: started),
                   AX.focusedWindow(pid: pid).map({ CFEqual($0, window) }) == true,
                   isFocused(composer, pid: pid) else { return false }
             let current = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
-            guard current.identity.map({ identity.matches($0, equals: { CFEqual($0, $1) }) }) == true,
-                  let button = current.modelButton else { return false }
-            let currentSelection = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models)
-            return currentSelection.modelID == selection.modelID
-                && (!preservingEffort || currentSelection.effort == selection.effort)
+            return current.identity.map { identity.matches($0, equals: { CFEqual($0, $1) }) } == true
+                && current.modelButton.map { CurrentModelMatcher.selection(forButtonTitle: AX.title($0), among: models).modelID } == selection.modelID
         }
         let query = "/ultrafast"
         func inspectCommand() -> (AXUIElement, SpeedCommandState)? {
@@ -406,7 +411,7 @@ final class ModelSwitcher {
             usleep(SpeedShortcut.commandStepDelay) // The combined model/speed action also lets its focused input settle before each command it types (Ethan, 2026-10-31).
             var typed = ""
             for character in query {
-                guard stillAuthorized(), !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid),
+                guard !Keyboard.userInteracted(since: started), isFocused(composer, pid: pid),
                       Keyboard.typeUnlessTyping(character, pid: pid) else {
                     _ = removeTyped(typed, before: before, composer: composer, pid: pid, since: started)
                     return nil
@@ -435,11 +440,7 @@ final class ModelSwitcher {
             Log.info("mouse-shortcut result=confirmed model=\(requestedModelID) speed=ultrafast alreadyEnabled=true")
             return .alreadyCurrent(selection)
         }
-        if readOnly {
-            guard cleanup() else { return .failed("draft-restoration-unconfirmed") }
-            return .failed("ultrafast-not-selected")
-        }
-        guard canApply(), sameComposer(), CodexUI.ultrafastCommand(near: composer)?.1 == .disabled,
+        guard sameComposer(), CodexUI.ultrafastCommand(near: composer)?.1 == .disabled,
               Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {
             _ = cleanup()
             return .failed("Ultrafast command changed before selection")

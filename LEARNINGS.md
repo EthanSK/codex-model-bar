@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.88: use the native Speed menu for the Voice handoff
+
+On Codex desktop build 30607, the installed Voice relay reached its slash-command read and refused a real composer. H Chat's exact-chat check then read Ultrafast in that composer's native Speed menu. The slash refusal did not establish that Ultrafast was unavailable, and its error did not identify which focus, text, or menu check failed.
+
+For the Voice relay, read the selected native `Speed {tier}` row and open its submenu only when an authorized apply must change the tier. A verify-only request never enters the submenu or types in the composer. Keep regular toolbar speed and combined Astra actions on their existing routes.
+
 ## 1.2.87: verify a new Voice chat's speed after opening
 
 H Chat's native global Voice shortcut cannot take a tier from Model Bar before a conversation exists. After opening the exact conversation, H Chat owns call identity and its existing compare-and-restore transaction for Codex's default tier. Selecting a composer speed in Codex can also save a new-chat default. Keep that restore logic with H Chat and prove the per-chat selection with Codex's native control, independently of the global file.
