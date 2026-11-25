@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.89: use the existing Voice relay for all three speeds
+
+The Voice speed relay accepts the canonical names `standard`, `fast`, and `ultrafast`. Codex's config IDs are a separate concern owned by H Chat's defaults transaction. The bar checks the model catalogue for faster tiers and uses the exact native option without changing models. The receipt confirms the selected tier and indicator. A verify-only request does not choose a tier.
+
+Fast and Standard may have the same Codex icon state. We keep an explicit readback while the same composer and controls agree. For those two tiers, later physical input invalidates that readback so an old confirmation does not mask a manual speed choice.
+
 ## 1.2.88: use the native Speed menu for the Voice handoff
 
 On Codex desktop build 30607, the installed Voice relay reached its slash-command read and refused a real composer. H Chat's exact-chat check then read Ultrafast in that composer's native Speed menu. The slash refusal did not establish that Ultrafast was unavailable, and its error did not identify which focus, text, or menu check failed.

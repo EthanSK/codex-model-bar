@@ -22,7 +22,8 @@ final class CurrentModelWatcher {
     private var forcePending = false
     private var suspended = false
     private var missingSince: Date?
-    private var voiceReadback: (composer: AXUIElement, title: String, model: CurrentSelection)?
+    private var voiceReadback: (composer: AXUIElement, title: String, model: CurrentSelection,
+                                speed: ResponseSpeed, confirmedAt: TimeInterval)?
     private let customReader: Reader?
     private let isTrusted: () -> Bool
     private let observesFocus: Bool
@@ -67,10 +68,10 @@ final class CurrentModelWatcher {
         poll(force: true)
     }
 
-    /// Keep the exact composer's verified Ultrafast while its visible icon and
-    /// identity still agree, even when H Chat restores a different global default. — GPT-6.2 Sol
-    func confirmVoiceUltrafast(composer: AXUIElement, title: String, model: CurrentSelection) {
-        voiceReadback = (composer, title, model)
+    /// Keep the native readback attached to this composer while its controls
+    /// agree, even when H Chat restores a different global default. — GPT-6.2 Sol
+    func confirmVoiceSpeed(_ speed: ResponseSpeed, composer: AXUIElement, title: String, model: CurrentSelection) {
+        voiceReadback = (composer, title, model, speed, ProcessInfo.processInfo.systemUptime)
         revision += 1
     }
 
@@ -162,11 +163,16 @@ final class CurrentModelWatcher {
                         forButtonTitle: located.modelButton.map(AX.title) ?? "", among: models)
                     let speedIcon = located.modelButton.map(CodexUI.showsSpeedIcon)
                     let verifiedSpeed: ResponseSpeed? = voiceReadback.flatMap { verified in
-                        guard speedIcon == true, read.modelID == verified.model.modelID,
+                        guard speedIcon != nil, speedIcon == verified.model.speedIconVisible,
+                              read.modelID == verified.model.modelID,
                               read.effort == verified.model.effort, AX.title(window) == verified.title,
                               let composer = located.composer, CFEqual(composer, verified.composer)
                         else { return nil }
-                        return .ultrafast
+                        // Fast and Standard can share an invisible icon. Native
+                        // interaction can invalidate either without changing it.
+                        guard verified.speed == .ultrafast || !Keyboard.userInteracted(since: verified.confirmedAt)
+                        else { return nil }
+                        return verified.speed
                     }
                     selection = CurrentSelection(modelID: read.modelID, effort: read.effort,
                                                  speedIconVisible: speedIcon, savedSpeed: self.savedCodexSpeed(),

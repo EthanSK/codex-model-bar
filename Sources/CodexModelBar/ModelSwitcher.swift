@@ -96,9 +96,9 @@ final class ModelSwitcher {
         }
     }
 
-    /// Applies the same explicit Ultrafast command to an already open, exact Voice composer. — GPT-6.2 Sol
-    func selectVoiceUltrafast(_ request: VoiceSpeedRequest, models: [CodexModel], codex: NSRunningApplication,
-                              completion: @escaping (Result, CGRect?, AXUIElement?) -> Void) {
+    /// Uses the exact open Voice composer's native Speed menu. — GPT-6.2 Sol
+    func selectVoiceSpeed(_ request: VoiceSpeedRequest, models: [CodexModel], codex: NSRunningApplication,
+                          completion: @escaping (Result, CGRect?, AXUIElement?) -> Void) {
         guard !busy else { completion(.failed("busy"), nil, nil); return }
         busy = true
         let started = ProcessInfo.processInfo.systemUptime
@@ -118,7 +118,8 @@ final class ModelSwitcher {
         let pid = codex.processIdentifier
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.4)
-        guard request.isCurrent, HChatVoiceIdentity.matches(request), !Keyboard.userInteracted(since: started),
+        guard request.isCurrent, let speed = request.requestedSpeed, HChatVoiceIdentity.matches(request),
+              !Keyboard.userInteracted(since: started),
               codex.isActive, let window: AXUIElement = AX.attribute(app, kAXFocusedWindowAttribute),
               AX.title(window) == request.chatTitle,
               let windows: [AXUIElement] = AX.attribute(app, kAXWindowsAttribute),
@@ -138,7 +139,8 @@ final class ModelSwitcher {
         let modelTitle = AX.title(button)
         let selection = CurrentModelMatcher.selection(forButtonTitle: modelTitle, among: models)
         guard let modelID = selection.modelID, selection.effort != nil,
-              models.contains(where: { $0.id == modelID && $0.speedTiers.contains(.ultrafast) }) else {
+              let model = models.first(where: { $0.id == modelID }),
+              speed == .standard || model.speedTiers.contains(speed) else {
             return (.failed("model-effort-or-tier-unavailable"), nil, nil)
         }
         func ownsComposer() -> Bool {
@@ -156,8 +158,8 @@ final class ModelSwitcher {
             let buttons = AX.all(in: pane, limit: 2_000, where: matches)
             return buttons.count == 1 ? buttons.first : nil
         }
-        let result = CodexSpeedMenu.ultrafast(in: window, trigger: trigger, readOnly: request.verifyOnly == true,
-                                              ownsComposer: ownsComposer, maySelect: {
+        let result = CodexSpeedMenu.select(speed, in: window, trigger: trigger, readOnly: request.verifyOnly == true,
+                                           ownsComposer: ownsComposer, maySelect: {
             HChatVoiceIdentity.matches(request) && ownsComposer()
                 && CodexUI.exactConversation(in: window, title: request.chatTitle).map { CFEqual($0, pane) } == true
         }, stillCurrent: { request.isCurrent })
@@ -165,14 +167,17 @@ final class ModelSwitcher {
         case .applied, .alreadySelected:
             guard HChatVoiceIdentity.matches(request), ownsComposer(),
                   CodexUI.exactConversation(in: window, title: request.chatTitle).map({ CFEqual($0, pane) }) == true,
-                  poll(timeout: 0.6, {
+                  let verified: CurrentSelection = poll(timeout: 0.6, {
                       guard request.isCurrent, ownsComposer(), let button = trigger() else { return nil }
-                      return CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models) == selection ? true : nil
-                  }) == true else {
+                      let current = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models)
+                      guard current == selection else { return nil }
+                      return CurrentSelection(modelID: current.modelID, effort: current.effort,
+                                              speedIconVisible: CodexUI.showsSpeedIcon(button))
+                  }) else {
                 return (.failed("selection-or-composer-changed"), nil, nil)
             }
-            if result == .applied { return (.switched(selection), bounds, composer) }
-            return (.alreadyCurrent(selection), bounds, composer)
+            if result == .applied { return (.switched(verified), bounds, composer) }
+            return (.alreadyCurrent(verified), bounds, composer)
         case .refused(let reason):
             return (.failed(reason), nil, nil)
         }

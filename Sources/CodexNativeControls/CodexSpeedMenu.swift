@@ -11,15 +11,15 @@ public enum CodexSpeedMenu {
         case refused(String)
     }
 
-    public static func ultrafast(in window: AXUIElement, trigger: @escaping () -> AXUIElement?,
-                                 readOnly: Bool, ownsComposer: @escaping () -> Bool,
-                                 maySelect: @escaping () -> Bool, stillCurrent: @escaping () -> Bool) -> Result {
+    public static func select(_ speed: ResponseSpeed, in window: AXUIElement, trigger: @escaping () -> AXUIElement?,
+                              readOnly: Bool, ownsComposer: @escaping () -> Bool,
+                              maySelect: @escaping () -> Bool, stillCurrent: @escaping () -> Bool) -> Result {
         let menu = Menu<AXUIElement>(
             items: { items(in: window).map { $0.map { (CodexAX.title($0), $0) } } },
             press: { CodexAX.press($0) }, trigger: trigger,
             ownsComposer: ownsComposer, maySelect: maySelect, stillCurrent: stillCurrent
         )
-        return run(menu, readOnly: readOnly)
+        return run(menu, speed: speed, readOnly: readOnly)
     }
 
     struct Menu<Item> {
@@ -31,11 +31,11 @@ public enum CodexSpeedMenu {
         let stillCurrent: () -> Bool
     }
 
-    static func run<Item>(_ menu: Menu<Item>, readOnly: Bool) -> Result {
+    static func run<Item>(_ menu: Menu<Item>, speed: ResponseSpeed, readOnly: Bool) -> Result {
         guard menu.stillCurrent(), menu.ownsComposer(), menu.items()?.isEmpty == true,
               let trigger = menu.trigger(), menu.press(trigger) else { return .refused("speed-menu-unavailable") }
 
-        let result = chooseUltrafast(in: menu, readOnly: readOnly)
+        let result = choose(speed, in: menu, readOnly: readOnly)
         // Closing a menu we opened is allowed on expiry only while we still own
         // the same composer and no physical input has intervened. — GPT-6.2 Sol
         guard menu.ownsComposer(), let remaining = menu.items() else { return .refused("speed-menu-cleanup-unconfirmed") }
@@ -47,7 +47,7 @@ public enum CodexSpeedMenu {
         return result
     }
 
-    private static func chooseUltrafast<Item>(in menu: Menu<Item>, readOnly: Bool) -> Result {
+    private static func choose<Item>(_ speed: ResponseSpeed, in menu: Menu<Item>, readOnly: Bool) -> Result {
         func tierRow() -> (tier: ResponseSpeed, item: Item)? {
             guard let entries = menu.items() else { return nil }
             let tiers = entries.compactMap { entry in
@@ -57,26 +57,27 @@ public enum CodexSpeedMenu {
             return tiers.count == 1 ? tiers.first : nil
         }
         guard let row = wait(menu, for: tierRow) else { return .refused("speed-selection-unreadable") }
-        if row.tier == .ultrafast { return .alreadySelected }
-        if readOnly { return .refused("ultrafast-not-selected") }
+        if row.tier == speed { return .alreadySelected }
+        let requested = speed.rawValue.lowercased()
+        if readOnly { return .refused("\(requested)-not-selected") }
         guard menu.stillCurrent(), menu.ownsComposer(), menu.press(row.item),
               let option = wait(menu, for: { () -> Item? in
-            let matches = menu.items()?.filter { $0.title == "Ultrafast" || $0.title.hasPrefix("Ultrafast ") }
+            let matches = menu.items()?.filter { $0.title == speed.rawValue || $0.title.hasPrefix(speed.rawValue + " ") }
             return matches?.count == 1 ? matches?.first?.item : nil
         }), menu.maySelect(), menu.stillCurrent(), menu.ownsComposer(), menu.press(option) else {
-            return .refused("ultrafast-selection-refused")
+            return .refused("\(requested)-selection-refused")
         }
 
         var reopened = false
         let confirmed: Bool? = wait(menu) {
-            if tierRow()?.tier == .ultrafast { return true }
+            if tierRow()?.tier == speed { return true }
             if !reopened, menu.items()?.isEmpty == true, let trigger = menu.trigger() {
                 reopened = true
                 _ = menu.press(trigger)
             }
             return nil
         }
-        return confirmed == true ? .applied : .refused("ultrafast-selection-unconfirmed")
+        return confirmed == true ? .applied : .refused("\(requested)-selection-unconfirmed")
     }
 
     private static func wait<Item, Value>(_ menu: Menu<Item>, allowsExpiry: Bool = false,

@@ -49,7 +49,8 @@ final class VoiceSpeedCommandTests: XCTestCase {
         let token = "\(UUID()):\(UUID()):108"
         let data = try [
             (token, now - 1_000, "ultrafast"), (token, now + 90_000, "ultrafast"),
-            (token, now + 15_000, "fast"), ("\(UUID()):\(UUID()):0", now + 15_000, "ultrafast")
+            (token, now + 15_000, "priority"), (token, now + 15_000, "default"),
+            (token, now + 15_000, "Fast"), ("\(UUID()):\(UUID()):0", now + 15_000, "ultrafast")
         ].map { token, expiry, speed in
             try JSONSerialization.data(withJSONObject: [
                 "requestId": UUID().uuidString, "callToken": token, "expiresAtMs": expiry,
@@ -87,6 +88,34 @@ final class VoiceSpeedCommandTests: XCTestCase {
         let receipt = try object(response)
         XCTAssertEqual(receipt["requestId"] as? String, id.uuidString)
         XCTAssertEqual(receipt["result"] as? String, "already-selected")
+    }
+
+    func testGenericSpeedReceiptsEchoCanonicalSelectionAndIndicator() async throws {
+        let name = "voice-speed-test.\(UUID())"
+        let command = VoiceSpeedCommand(name: name) { request, reply in
+            reply(VoiceSpeedReceipt(request, result: .alreadySelected,
+                                    selected: CurrentSelection(modelID: "gpt-6.1-sol", effort: "high"),
+                                    displaySpeed: request.requestedSpeed))
+        }
+        command.start()
+        let speeds = ["standard", "fast", "ultrafast"]
+        let requests = try speeds.map { speed in
+            try JSONSerialization.data(withJSONObject: [
+                "requestId": UUID().uuidString, "callToken": "\(UUID()):\(UUID()):108",
+                "expiresAtMs": Int64((Date().timeIntervalSince1970 + 15) * 1_000),
+                "speed": speed, "chatTitle": "A specific Voice chat", "verifyOnly": true
+            ])
+        }
+        let responses = await Task.detached {
+            requests.map { VoiceSpeedCommand.forward($0, remaining: 5, name: name) }
+        }.value
+        withExtendedLifetime(command) {}
+        for (speed, data) in zip(speeds, responses) {
+            let receipt = try object(data)
+            XCTAssertEqual(receipt["selectedSpeed"] as? String, speed)
+            XCTAssertEqual(receipt["displaySpeed"] as? String, speed)
+            XCTAssertEqual(receipt["result"] as? String, "already-selected")
+        }
     }
 
     private func object(_ data: Data?) throws -> [String: Any] {

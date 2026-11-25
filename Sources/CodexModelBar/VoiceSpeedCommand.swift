@@ -32,9 +32,13 @@ struct VoiceSpeedRequest: Decodable {
 
     var remaining: TimeInterval { Double(expiresAtMs) / 1_000 - Date().timeIntervalSince1970 }
 
+    var requestedSpeed: ResponseSpeed? {
+        ResponseSpeed.allCases.first { $0.rawValue.lowercased() == speed }
+    }
+
     var isCurrent: Bool {
         let time = remaining
-        return time > 0 && time <= 30 && speed == "ultrafast" && Call(callToken) != nil
+        return time > 0 && time <= 30 && requestedSpeed != nil && Call(callToken) != nil
             && !chatTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chatTitle.utf8.count <= 1_024
     }
 }
@@ -58,7 +62,7 @@ struct VoiceSpeedReceipt: Encodable {
         callToken = request.callToken
         expiresAtMs = request.expiresAtMs
         self.result = result
-        selectedSpeed = selected == nil ? nil : "ultrafast"
+        selectedSpeed = selected == nil ? nil : request.requestedSpeed?.rawValue.lowercased()
         self.displaySpeed = displaySpeed?.rawValue.lowercased()
         model = selected?.modelID
         reasoning = selected?.effort

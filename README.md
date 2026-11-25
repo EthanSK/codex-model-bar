@@ -87,6 +87,8 @@ While a Codex Voice call is live, a small round button follows Codex’s floatin
 
 Compatible H Chat builds can request Ultrafast from Model Bar after opening a new Voice chat. Model Bar checks the exact open composer, keeps its model and reasoning, and reads back the selected speed. H Chat handles restoring the ordinary default and asks Model Bar to verify the selection again. This selection can apply to later turns. The opening turn has already started or may already have completed.
 
+Model Bar 1.2.89 can also accept an explicit Standard, Fast, or Ultrafast request from compatible H Chat builds for the current Voice chat. The available speeds depend on the selected model.
+
 This button requires [H Chat](https://github.com/EthanSK/hello-chat) build 1054 or later in Applications. If the helper is missing, too old, or unable to identify the call, the bar shows a short notice.
 
 ## Limits and privacy

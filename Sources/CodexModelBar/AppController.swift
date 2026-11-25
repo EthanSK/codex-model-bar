@@ -233,7 +233,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
 
     /// Confirms the exact post-launch selection and updates only its visible bar. — GPT-6.2 Sol
     private func selectVoiceSpeed(_ request: VoiceSpeedRequest, reply: @escaping (VoiceSpeedReceipt) -> Void) {
-        guard request.isCurrent, AX.isTrusted, let call = VoiceSpeedRequest.Call(request.callToken),
+        guard request.isCurrent, let speed = request.requestedSpeed, AX.isTrusted, let call = VoiceSpeedRequest.Call(request.callToken),
               let codex = tracker.codexApp, codex.processIdentifier == call.pid, codex.isActive else {
             reply(VoiceSpeedReceipt(request, reason: "codex-or-accessibility-unavailable")); return
         }
@@ -246,7 +246,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         let started = ProcessInfo.processInfo.systemUptime
         watcher.setSuspended(true)
         barViews.forEach { $0.setBusySpeed(true) }
-        switcher.selectVoiceUltrafast(request, models: allModels, codex: codex) { [weak self] result, bounds, composer in
+        switcher.selectVoiceSpeed(request, models: allModels, codex: codex) { [weak self] result, bounds, composer in
             guard let self else { reply(VoiceSpeedReceipt(request, reason: "bar-unavailable")); return }
             defer {
                 self.barViews.forEach { $0.setBusySpeed(false) }
@@ -268,9 +268,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
                   let bar = self.bars[focusedID], bar.panel.isVisible else {
                 reply(VoiceSpeedReceipt(request, selected: selection, reason: "indicator-unavailable")); return
             }
-            self.watcher.confirmVoiceUltrafast(composer: composer, title: request.chatTitle, model: selection)
+            self.watcher.confirmVoiceSpeed(speed, composer: composer, title: request.chatTitle, model: selection)
             bar.view.setCurrentSelection(selection)
-            bar.view.setCurrentSpeed(.ultrafast)
+            bar.view.setCurrentSpeed(speed)
             reply(VoiceSpeedReceipt(request, result: status, selected: selection, displaySpeed: bar.view.displayedSpeed))
         }
     }
