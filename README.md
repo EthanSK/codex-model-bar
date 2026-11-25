@@ -85,6 +85,8 @@ The slider and mouse deliberately keep native increase/decrease commands: these 
 
 While a Codex Voice call is live, a small round button follows Codex’s floating Voice controls. Click it to open the chat that owns the call. The button runs the same Show Voice command as H Chat’s spoken shortcut. H Chat identifies the live call independently of the sidebar and opens its chat in the running Codex app.
 
+Compatible H Chat builds can request Ultrafast from Model Bar after opening a new Voice chat. Model Bar checks the exact open composer, keeps its model and reasoning, and reads back the selected speed. H Chat handles restoring the ordinary default and asks Model Bar to verify the selection again. This selection can apply to later turns. The opening turn has already started or may already have completed.
+
 This button requires [H Chat](https://github.com/EthanSK/hello-chat) build 1054 or later in Applications. If the helper is missing, too old, or unable to identify the call, the bar shows a short notice.
 
 ## Limits and privacy
