@@ -7,12 +7,15 @@ public struct CurrentSelection: Equatable, Sendable {
     public let speedIconVisible: Bool?
     /// Codex's last saved speed choice (`service_tier` in its config); tells Fast from Ultrafast when the icon cannot. Nil when unreadable.
     public let savedSpeed: ResponseSpeed?
+    public let verifiedVoiceSpeed: ResponseSpeed?
 
-    public init(modelID: String?, effort: String?, speedIconVisible: Bool? = nil, savedSpeed: ResponseSpeed? = nil) {
+    public init(modelID: String?, effort: String?, speedIconVisible: Bool? = nil, savedSpeed: ResponseSpeed? = nil,
+                verifiedVoiceSpeed: ResponseSpeed? = nil) {
         self.modelID = modelID
         self.effort = effort
         self.speedIconVisible = speedIconVisible
         self.savedSpeed = savedSpeed
+        self.verifiedVoiceSpeed = verifiedVoiceSpeed
     }
 }
 

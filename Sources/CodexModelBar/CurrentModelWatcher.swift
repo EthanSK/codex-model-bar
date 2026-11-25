@@ -22,6 +22,7 @@ final class CurrentModelWatcher {
     private var forcePending = false
     private var suspended = false
     private var missingSince: Date?
+    private var voiceReadback: (composer: AXUIElement, title: String, model: CurrentSelection)?
     private let customReader: Reader?
     private let isTrusted: () -> Bool
     private let observesFocus: Bool
@@ -52,6 +53,7 @@ final class CurrentModelWatcher {
         revision += 1
         missingSince = nil
         if pidChanged {
+            voiceReadback = nil
             lastReported = nil
             timer?.invalidate()
             timer = nil
@@ -63,6 +65,19 @@ final class CurrentModelWatcher {
             }
         }
         poll(force: true)
+    }
+
+    /// Keep the exact composer's verified Ultrafast while its visible icon and
+    /// identity still agree, even when H Chat restores a different global default. — GPT-6.2 Sol
+    func confirmVoiceUltrafast(composer: AXUIElement, title: String, model: CurrentSelection) {
+        voiceReadback = (composer, title, model)
+        revision += 1
+    }
+
+    func clearVoiceReadback() {
+        guard voiceReadback != nil else { return }
+        voiceReadback = nil
+        revision += 1
     }
 
     /// A switch has its own AX reads. Suppress stale watcher results until it ends.
@@ -124,6 +139,7 @@ final class CurrentModelWatcher {
         inFlight = true
         let requestRevision = revision
         let models = self.models
+        let voiceReadback = self.voiceReadback
         AX.queue.async { [weak self] in
             guard let self else { return }
             if AX.hasQueuedAction { DispatchQueue.main.async { self.inFlight = false }; return } // A queued action runs next; this poll's pre-walk reads held a quick reasoning flick ~130 ms until its release cancelled it (2026-10-29 19:07:40). The timer polls again shortly.
@@ -144,9 +160,17 @@ final class CurrentModelWatcher {
                                                         yieldsToActions: true) // Toolbar and Agentic Mouse actions must not wait behind this background walk.
                     let read = CurrentModelMatcher.selection(
                         forButtonTitle: located.modelButton.map(AX.title) ?? "", among: models)
+                    let speedIcon = located.modelButton.map(CodexUI.showsSpeedIcon)
+                    let verifiedSpeed: ResponseSpeed? = voiceReadback.flatMap { verified in
+                        guard speedIcon == true, read.modelID == verified.model.modelID,
+                              read.effort == verified.model.effort, AX.title(window) == verified.title,
+                              let composer = located.composer, CFEqual(composer, verified.composer)
+                        else { return nil }
+                        return .ultrafast
+                    }
                     selection = CurrentSelection(modelID: read.modelID, effort: read.effort,
-                                                 speedIconVisible: located.modelButton.map(CodexUI.showsSpeedIcon),
-                                                 savedSpeed: self.savedCodexSpeed()) // Part of the compared selection so a Fast↔Ultrafast change, which leaves the icon unchanged, still updates the bar.
+                                                 speedIconVisible: speedIcon, savedSpeed: self.savedCodexSpeed(),
+                                                 verifiedVoiceSpeed: verifiedSpeed)
                 } else {
                     selection = nil
                 }
@@ -160,6 +184,7 @@ final class CurrentModelWatcher {
                     // Allow a short gap without flashing the slider back to zero.
                     if let selection, selection.modelID != nil {
                         self.missingSince = nil
+                        if selection.verifiedVoiceSpeed == nil { self.voiceReadback = nil }
                         self.report(selection, windowBounds: windowBounds)
                     } else {
                         if self.missingSince == nil { self.missingSince = Date() }

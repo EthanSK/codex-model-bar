@@ -67,6 +67,28 @@ final class VoiceSpeedCommandTests: XCTestCase {
         }
     }
 
+    func testVerificationIsASeparateReadOnlyRequest() async throws {
+        let name = "voice-speed-test.\(UUID())"
+        let command = VoiceSpeedCommand(name: name) { request, reply in
+            XCTAssertEqual(request.verifyOnly, true)
+            reply(VoiceSpeedReceipt(request, result: .alreadySelected,
+                                    selected: CurrentSelection(modelID: "gpt-6.1-sol", effort: "high"),
+                                    displaySpeed: .ultrafast))
+        }
+        command.start()
+        let id = UUID()
+        let request = try JSONSerialization.data(withJSONObject: [
+            "requestId": id.uuidString, "callToken": "\(UUID()):\(UUID()):108",
+            "expiresAtMs": Int64((Date().timeIntervalSince1970 + 15) * 1_000),
+            "speed": "ultrafast", "chatTitle": "A specific Voice chat", "verifyOnly": true
+        ])
+        let response = await Task.detached { VoiceSpeedCommand.forward(request, remaining: 5, name: name) }.value
+        withExtendedLifetime(command) {}
+        let receipt = try object(response)
+        XCTAssertEqual(receipt["requestId"] as? String, id.uuidString)
+        XCTAssertEqual(receipt["result"] as? String, "already-selected")
+    }
+
     private func object(_ data: Data?) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(data)) as? [String: Any])
     }

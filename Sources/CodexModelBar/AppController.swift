@@ -179,8 +179,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
               let window = tracker.snapshot.taskWindow(matching: reading.windowBounds), let bar = bars[window.id] else { return }
         bar.view.setCurrentSelection(reading.selection)
         let offered = allModels.first { $0.id == reading.selection.modelID }?.speedTiers ?? []
-        bar.view.setCurrentSpeed(speedSwitcher.observe(iconVisible: reading.selection.speedIconVisible, offered: offered,
-                                                       saved: reading.selection.savedSpeed))
+        bar.view.setCurrentSpeed(reading.selection.verifiedVoiceSpeed ??
+            speedSwitcher.observe(iconVisible: reading.selection.speedIconVisible, offered: offered,
+                                  saved: reading.selection.savedSpeed))
     }
 
     /// The bar that reports an action: the clicked bar, or the focused window's for Agentic Mouse URLs.
@@ -245,7 +246,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         let started = ProcessInfo.processInfo.systemUptime
         watcher.setSuspended(true)
         barViews.forEach { $0.setBusySpeed(true) }
-        switcher.selectVoiceUltrafast(request, models: allModels, codex: codex) { [weak self] result, bounds in
+        switcher.selectVoiceUltrafast(request, models: allModels, codex: codex) { [weak self] result, bounds, composer in
             guard let self else { reply(VoiceSpeedReceipt(request, reason: "bar-unavailable")); return }
             defer {
                 self.barViews.forEach { $0.setBusySpeed(false) }
@@ -261,12 +262,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
             case .requested, .cancelledForTyping:
                 reply(VoiceSpeedReceipt(request, reason: "selection-unconfirmed")); return
             }
-            guard request.isCurrent, !Keyboard.userInteracted(since: started), codex.isActive, let bounds,
+            guard request.isCurrent, !Keyboard.userInteracted(since: started), codex.isActive, let bounds, let composer,
                   let focusedID = self.tracker.snapshot.focusedWindowID,
                   let matching = self.tracker.snapshot.taskWindow(matching: bounds), matching.id == focusedID,
                   let bar = self.bars[focusedID], bar.panel.isVisible else {
                 reply(VoiceSpeedReceipt(request, selected: selection, reason: "indicator-unavailable")); return
             }
+            self.watcher.confirmVoiceUltrafast(composer: composer, title: request.chatTitle, model: selection)
             bar.view.setCurrentSelection(selection)
             bar.view.setCurrentSpeed(.ultrafast)
             reply(VoiceSpeedReceipt(request, result: status, selected: selection, displaySpeed: bar.view.displayedSpeed))
@@ -276,6 +278,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     private func changeSpeed(_ request: SpeedSwitcher.Request, from windowID: CGWindowID? = nil) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }
         guard let codex = tracker.codexApp else { return }
+        watcher.clearVoiceReadback()
         let bar = actingBar(for: windowID)
         barViews.forEach { $0.setBusySpeed(true) } // One keyboard handoff at a time across the whole app, so every bar locks.
         bar?.showStatus(nil)

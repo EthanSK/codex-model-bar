@@ -98,15 +98,15 @@ final class ModelSwitcher {
 
     /// Applies the same explicit Ultrafast command to an already open, exact Voice composer. — GPT-6.2 Sol
     func selectVoiceUltrafast(_ request: VoiceSpeedRequest, models: [CodexModel], codex: NSRunningApplication,
-                              completion: @escaping (Result, CGRect?) -> Void) {
-        guard !busy else { completion(.failed("busy"), nil); return }
+                              completion: @escaping (Result, CGRect?, AXUIElement?) -> Void) {
+        guard !busy else { completion(.failed("busy"), nil, nil); return }
         busy = true
         let started = ProcessInfo.processInfo.systemUptime
         AX.enqueueAction {
             let outcome = Self.performVoiceSpeed(request, models: models, codex: codex, started: started)
             DispatchQueue.main.async {
                 self.busy = false
-                completion(outcome.0, outcome.1)
+                completion(outcome.0, outcome.1, outcome.2)
             }
         }
     }
@@ -114,7 +114,7 @@ final class ModelSwitcher {
     // MARK: - Steps (all on AX.queue)
 
     private static func performVoiceSpeed(_ request: VoiceSpeedRequest, models: [CodexModel],
-                                          codex: NSRunningApplication, started: TimeInterval) -> (Result, CGRect?) {
+                                          codex: NSRunningApplication, started: TimeInterval) -> (Result, CGRect?, AXUIElement?) {
         let pid = codex.processIdentifier
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.4)
@@ -124,20 +124,20 @@ final class ModelSwitcher {
               let windows: [AXUIElement] = AX.attribute(app, kAXWindowsAttribute),
               windows.filter({ AX.title($0) == request.chatTitle }).count == 1,
               let bounds = CodexWindowTracker.axFrame(window) else {
-            return (.failed("call-or-window-unavailable"), nil)
+            return (.failed("call-or-window-unavailable"), nil, nil)
         }
         // A focused composer alone can be a side chat. — GPT-6.2 Sol
         guard let pane = CodexUI.exactConversation(in: window, title: request.chatTitle) else {
-            return (.failed("ambiguous-chat"), nil)
+            return (.failed("ambiguous-chat"), nil, nil)
         }
         let located = CodexUI.Cache.current(window: window, models: models, forceRefresh: true)
         guard let composer = located.composer, let button = located.modelButton,
               CodexUI.isInConversation(composer, pane: pane),
-              CodexUI.composerText(composer) == "" else { return (.failed("composer-unavailable-or-has-draft"), nil) }
+              CodexUI.composerText(composer) == "" else { return (.failed("composer-unavailable-or-has-draft"), nil, nil) }
         let selection = CurrentModelMatcher.selection(forButtonTitle: AX.title(button), among: models)
         guard let modelID = selection.modelID, selection.effort != nil,
               models.contains(where: { $0.id == modelID && $0.speedTiers.contains(.ultrafast) }) else {
-            return (.failed("model-effort-or-tier-unavailable"), nil)
+            return (.failed("model-effort-or-tier-unavailable"), nil, nil)
         }
         func sameWindow() -> Bool {
             request.isCurrent && codex.isActive && AX.title(window) == request.chatTitle
@@ -145,7 +145,8 @@ final class ModelSwitcher {
         }
         let result = selectUltrafast(original: located, window: window, pid: pid, models: models,
                                      selection: selection, requestedModelID: modelID, since: started,
-                                     preservingEffort: true, stillAuthorized: sameWindow, canApply: {
+                                     preservingEffort: true, readOnly: request.verifyOnly == true,
+                                     stillAuthorized: sameWindow, canApply: {
             HChatVoiceIdentity.matches(request) && sameWindow()
                 && CodexUI.exactConversation(in: window, title: request.chatTitle).map { CFEqual($0, pane) } == true
         })
@@ -157,12 +158,12 @@ final class ModelSwitcher {
                                                        window: window, pid: pid, models: models, since: started,
                                                        timeout: 0.4, logPrefix: "voice-speed"),
                   let composer = latest.located.composer, CodexUI.composerText(composer) == "" else {
-                return (.failed("selection-or-composer-changed"), nil)
+                return (.failed("selection-or-composer-changed"), nil, nil)
             }
-            if case .switched = result { return (.switched(latest.selection), bounds) }
-            return (.alreadyCurrent(latest.selection), bounds)
+            if case .switched = result { return (.switched(latest.selection), bounds, composer) }
+            return (.alreadyCurrent(latest.selection), bounds, composer)
         default:
-            return (result, nil)
+            return (result, nil, nil)
         }
     }
 
@@ -378,7 +379,7 @@ final class ModelSwitcher {
     /// command entry, so an unavailable command cannot submit the user's draft.
     private static func selectUltrafast(original: CodexUI.Located, window: AXUIElement, pid: pid_t,
                                        models: [CodexModel], selection: CurrentSelection, requestedModelID: String,
-                                       since started: TimeInterval, preservingEffort: Bool = false,
+                                       since started: TimeInterval, preservingEffort: Bool = false, readOnly: Bool = false,
                                        stillAuthorized: () -> Bool = { true },
                                        canApply: () -> Bool = { true }) -> Result {
         guard stillAuthorized(), !Keyboard.userInteracted(since: started), selection.modelID == requestedModelID,
@@ -433,6 +434,10 @@ final class ModelSwitcher {
             guard cleanup() else { return .failed("Could not restore the draft after checking Ultrafast") }
             Log.info("mouse-shortcut result=confirmed model=\(requestedModelID) speed=ultrafast alreadyEnabled=true")
             return .alreadyCurrent(selection)
+        }
+        if readOnly {
+            guard cleanup() else { return .failed("draft-restoration-unconfirmed") }
+            return .failed("ultrafast-not-selected")
         }
         guard canApply(), sameComposer(), CodexUI.ultrafastCommand(near: composer)?.1 == .disabled,
               Keyboard.pressUnlessTyping(Keyboard.returnKey, pid: pid) else {

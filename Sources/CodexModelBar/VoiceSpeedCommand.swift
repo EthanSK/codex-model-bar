@@ -12,6 +12,7 @@ struct VoiceSpeedRequest: Decodable {
     let expiresAtMs: Int64
     let speed: String
     let chatTitle: String
+    let verifyOnly: Bool?
 
     struct Call: Equatable {
         let thread: UUID
