@@ -1,6 +1,10 @@
 import AppKit
 import ApplicationServices
 
+if Array(CommandLine.arguments.dropFirst()) == [VoiceSpeedCommand.argument] {
+    exit(VoiceSpeedCommand.runClient())
+}
+
 // Exercise the final bundle's actual loader without starting AX, login items,
 // keyboard routing, a toolbar or an update check on a build/test worker.
 if CommandLine.arguments.contains("--check-packaged-launch") {

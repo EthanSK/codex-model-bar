@@ -1,5 +1,11 @@
 # Learnings
 
+## 1.2.87: verify a new Voice chat's speed after opening
+
+H Chat's native global Voice shortcut cannot take a tier from Model Bar before a conversation exists. After opening the exact conversation, H Chat owns call identity and its existing compare-and-restore transaction for Codex's default tier. Selecting a composer speed in Codex can also save a new-chat default. Keep that restore logic with H Chat and prove the per-chat selection with Codex's native control, independently of the global file.
+
+Model Bar's `--voice-speed-v1` command forwards a bounded JSON request to the running bar. The relay checks expiry and request identity. The bar revalidates the exact live call with H Chat and uses the same explicit Ultrafast command as the combined toolbar action. Confirm the same model, reasoning, and draft before returning the selected speed and the bar's displayed speed. Keep that receipt separate from effective speed recorded for any turn, including the opening turn.
+
 ## 2026-11-17 — Astra shortcut follows the catalogue
 
 Resolve the Astra Ultrafast gesture from the newest visible Astra with Ultrafast in its advertised speed tiers. Pass that exact ID through model confirmation and speed selection. Checking a separate fixed ID in the speed step would block a successful switch on the first release after an upgrade. The focused mouse shortcut suite covers numeric version order, hidden entries and newer models that cannot run at Ultrafast.

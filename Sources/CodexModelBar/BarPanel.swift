@@ -91,6 +91,7 @@ final class BarView: NSVisualEffectView {
     private var busyModelID: String?
     private var busySpeed = false
     private var currentSpeed: ResponseSpeed? // Best-effort speed of the focused chat; nil when Codex's model button was not read.
+    var displayedSpeed: ResponseSpeed? { currentSpeed }
     private var statusHideWork: DispatchWorkItem?
 
     var currentModelIdentifier: String? { currentModelID }

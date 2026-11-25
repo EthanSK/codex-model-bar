@@ -23,6 +23,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     private let switcher = ModelSwitcher()
     private let reasoningSwitcher = ReasoningSwitcher()
     private let speedSwitcher = SpeedSwitcher()
+    private lazy var voiceSpeedCommand = VoiceSpeedCommand { [weak self] request, reply in
+        guard let self else { reply(VoiceSpeedReceipt(request, reason: "bar-unavailable")); return }
+        self.selectVoiceSpeed(request, reply: reply)
+    }
     private var updater: AppUpdater?
     /// The button beside Codex's floating Voice pill that reveals the live Voice chat. Independent of the bars: the pill floats over every app, so this follows it, not Codex's windows.
     private lazy var voiceChatJump = VoiceChatJump(codexApp: { [weak self] in self?.tracker.codexApp })
@@ -83,6 +87,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
         tracker.onChange = { [weak self] snapshot in self?.layout(for: snapshot) }
         tracker.start() // Click-to-focus was removed after unreliable live targeting; do not restore a guessed pane resolver (task 01a0d315-7d5e-7be0-bc08-80626ca0729b).
         voiceChatJump.start()
+        voiceSpeedCommand.start()
 
         registerLoginItemOnFirstLaunch()
         updateTrustStatus(prompt: true)
@@ -224,6 +229,49 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuItemValidation
     }
 
     // MARK: - Switching
+
+    /// Confirms the exact post-launch selection and updates only its visible bar. — GPT-6.2 Sol
+    private func selectVoiceSpeed(_ request: VoiceSpeedRequest, reply: @escaping (VoiceSpeedReceipt) -> Void) {
+        guard request.isCurrent, AX.isTrusted, let call = VoiceSpeedRequest.Call(request.callToken),
+              let codex = tracker.codexApp, codex.processIdentifier == call.pid, codex.isActive else {
+            reply(VoiceSpeedReceipt(request, reason: "codex-or-accessibility-unavailable")); return
+        }
+        guard !switcher.isBusy, !reasoningSwitcher.isBusy, !speedSwitcher.isBusy else {
+            reply(VoiceSpeedReceipt(request, reason: "busy")); return
+        }
+        guard let focused = tracker.snapshot.focusedWindowID, bars[focused]?.panel.isVisible == true else {
+            reply(VoiceSpeedReceipt(request, reason: "indicator-unavailable")); return
+        }
+        let started = ProcessInfo.processInfo.systemUptime
+        watcher.setSuspended(true)
+        barViews.forEach { $0.setBusySpeed(true) }
+        switcher.selectVoiceUltrafast(request, models: allModels, codex: codex) { [weak self] result, bounds in
+            guard let self else { reply(VoiceSpeedReceipt(request, reason: "bar-unavailable")); return }
+            defer {
+                self.barViews.forEach { $0.setBusySpeed(false) }
+                self.watcher.setSuspended(false)
+                self.updater?.resumeIfIdle()
+            }
+            let selection: CurrentSelection
+            let status: VoiceSpeedReceipt.Result
+            switch result {
+            case .switched(let selected): selection = selected; status = .applied
+            case .alreadyCurrent(let selected): selection = selected; status = .alreadySelected
+            case .failed(let reason, _): reply(VoiceSpeedReceipt(request, reason: reason)); return
+            case .requested, .cancelledForTyping:
+                reply(VoiceSpeedReceipt(request, reason: "selection-unconfirmed")); return
+            }
+            guard request.isCurrent, !Keyboard.userInteracted(since: started), codex.isActive, let bounds,
+                  let focusedID = self.tracker.snapshot.focusedWindowID,
+                  let matching = self.tracker.snapshot.taskWindow(matching: bounds), matching.id == focusedID,
+                  let bar = self.bars[focusedID], bar.panel.isVisible else {
+                reply(VoiceSpeedReceipt(request, selected: selection, reason: "indicator-unavailable")); return
+            }
+            bar.view.setCurrentSelection(selection)
+            bar.view.setCurrentSpeed(.ultrafast)
+            reply(VoiceSpeedReceipt(request, result: status, selected: selection, displaySpeed: bar.view.displayedSpeed))
+        }
+    }
 
     private func changeSpeed(_ request: SpeedSwitcher.Request, from windowID: CGWindowID? = nil) {
         guard AX.isTrusted else { updateTrustStatus(prompt: true); return }

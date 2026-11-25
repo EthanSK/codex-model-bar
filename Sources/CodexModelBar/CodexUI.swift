@@ -134,6 +134,46 @@ enum CodexUI {
         }
     }
 
+    /// H Chat supplies the title uniquely bound to the active thread UUID. A second
+    /// conversation or a conflicting selected row makes that window unsafe to target. — GPT-6.2 Sol
+    static func exactConversation(in window: AXUIElement, title: String) -> AXUIElement? {
+        var pending = [window]
+        var visited = 0
+        var conversation: AXUIElement?
+        var selectedTitleRows = 0
+        while let element = pending.popLast() {
+            visited += 1
+            guard visited <= 2_500 else { return nil }
+            if isConversationRegion(element) {
+                guard conversation == nil else { return nil }
+                conversation = element
+                continue
+            }
+            let role = AX.role(element)
+            if role == kAXButtonRole as String {
+                let description = AX.string(element, kAXDescriptionAttribute)
+                if description == title || AX.title(element) == title {
+                    guard AX.string(element, "AXARIACurrent") == "page" else { return nil }
+                    selectedTitleRows += 1
+                    guard selectedTitleRows == 1 else { return nil }
+                }
+            } else if role != kAXStaticTextRole as String && role != kAXImageRole as String {
+                pending.append(contentsOf: AX.children(element))
+            }
+        }
+        return conversation
+    }
+
+    static func isInConversation(_ element: AXUIElement, pane: AXUIElement) -> Bool {
+        var ancestor = AX.parent(element)
+        for _ in 0..<20 {
+            guard let parent = ancestor else { return false }
+            if CFEqual(parent, pane) { return true }
+            ancestor = AX.parent(parent)
+        }
+        return false
+    }
+
     private static func isConversationRegion(_ node: AXUIElement) -> Bool {
         AX.string(node, kAXSubroleAttribute) == "AXLandmarkRegion"
             && AX.string(node, kAXDescriptionAttribute) == "Conversation" // Same structural identity measured by Agent Flow's pane_focuser.py; no app-version gate.
